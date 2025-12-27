@@ -90,6 +90,9 @@ builder.Services.AddScoped<DocumentValidator>();
 builder.Services.AddScoped<IDocumentValidationService, DocumentValidationService>();
 builder.Services.AddScoped<IAiDocumentAnalyzer, AiDocumentAnalyzerBedrock>();
 
+// AWS Textract Service
+builder.Services.AddScoped<backend.Interfaces.ITextractService, backend.Services.TextractService>();
+
 // AWS S3 Configuration
 // AWS S3 Configuration - prefer user-secrets under "AWSS3" but fall back to "AwsS3Settings"
 builder.Services.Configure<AwsS3Settings>(builder.Configuration.GetSection("AwsS3Settings"));
