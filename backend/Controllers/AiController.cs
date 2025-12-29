@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using PreClear.Api.Interfaces;
 using PreClear.Api.Services;
 using PreClear.Api.Models;
+using backend.Interfaces;
 
 namespace PreClear.Api.Controllers
 {
@@ -18,12 +19,18 @@ namespace PreClear.Api.Controllers
         private readonly IAiService _ai;
         private readonly ILogger<AiController> _logger;
         private readonly IShipmentService _shipmentService;
+        private readonly ITextractService _textractService;
 
-        public AiController(IAiService ai, ILogger<AiController> logger, IShipmentService shipmentService)
+        public AiController(
+            IAiService ai, 
+            ILogger<AiController> logger, 
+            IShipmentService shipmentService,
+            ITextractService textractService)
         {
             _ai = ai;
             _logger = logger;
             _shipmentService = shipmentService;
+            _textractService = textractService;
         }
 
         public class RequiredDocumentsRequest
@@ -92,6 +99,80 @@ namespace PreClear.Api.Controllers
         public class AnalyzeRequest
         {
             public string Description { get; set; } = string.Empty;
+        }
+
+        [HttpPost("extract-shipment-data")]
+        public async Task<IActionResult> ExtractShipmentData([FromForm] List<IFormFile> files)
+        {
+            try
+            {
+                if (files == null || files.Count == 0)
+                {
+                    return Ok(new 
+                    { 
+                        success = false, 
+                        error = "No files provided" 
+                    });
+                }
+
+                _logger.LogInformation("Extracting shipment data from {Count} files", files.Count);
+
+                var extractedData = await _textractService.ExtractShipmentDataFromDocumentsAsync(files);
+
+                _logger.LogInformation("Extraction completed. Found {KeyCount} keys", extractedData.Keys.Count);
+
+                // Build comprehensive response with all extracted fields
+                var response = new
+                {
+                    success = true,
+                    // Addresses
+                    shipper = extractedData.ContainsKey("shipper") ? extractedData["shipper"] : null,
+                    consignee = extractedData.ContainsKey("consignee") ? extractedData["consignee"] : null,
+                    // Products and packages
+                    products = extractedData.ContainsKey("products") ? extractedData["products"] : null,
+                    package = extractedData.ContainsKey("package") ? extractedData["package"] : null,
+                    // Customs and value
+                    customsValue = extractedData.ContainsKey("customsValue") ? extractedData["customsValue"] : null,
+                    // Shipment details - provide defaults if not extracted
+                    title = extractedData.ContainsKey("title") ? extractedData["title"] : (extractedData.ContainsKey("shipmentName") ? extractedData["shipmentName"] : null),
+                    shipmentTitle = extractedData.ContainsKey("shipmentTitle") ? extractedData["shipmentTitle"] : null,
+                    shipmentName = extractedData.ContainsKey("shipmentName") ? extractedData["shipmentName"] : null,
+                    mode = extractedData.ContainsKey("mode") ? extractedData["mode"] : "Air",
+                    shipmentType = extractedData.ContainsKey("shipmentType") ? extractedData["shipmentType"] : "International",
+                    pickupType = extractedData.ContainsKey("pickupType") ? extractedData["pickupType"] : "Scheduled Pickup",
+                    // Pickup and delivery
+                    pickupLocation = extractedData.ContainsKey("pickupLocation") ? extractedData["pickupLocation"] : null,
+                    pickupDate = extractedData.ContainsKey("pickupDate") ? extractedData["pickupDate"] : null,
+                    pickupTimeEarliest = extractedData.ContainsKey("pickupTimeEarliest") ? extractedData["pickupTimeEarliest"] : null,
+                    pickupTimeLatest = extractedData.ContainsKey("pickupTimeLatest") ? extractedData["pickupTimeLatest"] : null,
+                    estimatedDropoffDate = extractedData.ContainsKey("estimatedDropoffDate") ? extractedData["estimatedDropoffDate"] : null,
+                    // Service and payment
+                    serviceLevel = extractedData.ContainsKey("serviceLevel") ? extractedData["serviceLevel"] : "Standard",
+                    incoterm = extractedData.ContainsKey("incoterm") ? extractedData["incoterm"] : "FOB",
+                    currency = extractedData.ContainsKey("currency") ? extractedData["currency"] : "USD",
+                    billTo = extractedData.ContainsKey("billTo") ? extractedData["billTo"] : "Shipper",
+                    paymentTiming = extractedData.ContainsKey("paymentTiming") ? extractedData["paymentTiming"] : "Prepaid",
+                    paymentMethod = extractedData.ContainsKey("paymentMethod") ? extractedData["paymentMethod"] : "Credit Card",
+                    // Additional info
+                    reasonForExport = extractedData.ContainsKey("reasonForExport") ? extractedData["reasonForExport"] : null,
+                    specialInstructions = extractedData.ContainsKey("specialInstructions") ? extractedData["specialInstructions"] : null,
+                    insuranceRequired = extractedData.ContainsKey("insuranceRequired") ? extractedData["insuranceRequired"] : false,
+                    dangerousGoods = extractedData.ContainsKey("dangerousGoods") ? extractedData["dangerousGoods"] : false,
+                };
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during shipment data extraction");
+                
+                // Even on error, return 200 with success=false to prevent frontend JSON parse errors
+                return Ok(new 
+                { 
+                    success = false, 
+                    error = ex.Message 
+                });
+            }
         }
 
         [HttpPost("analyze")]
