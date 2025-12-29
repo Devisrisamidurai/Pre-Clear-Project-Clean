@@ -10,6 +10,9 @@ import { createShipment, updateShipment } from '../../api/shipments';
 import { markShipmentDocument } from '../../api/documents';
 import { getProfile } from '../../api/auth';
 import { uploadShipmentDocument } from '../../api/documents';
+import AutoFillToggle from '../AutoFillToggle';
+import DocumentUploadSection from '../DocumentUploadSection';
+import { useShipmentDraftStore } from '../../store/shipmentDraftStore';
 
 const modes = ['Air', 'Sea', 'Road', 'Rail', 'Courier', 'Multimodal'];
 const shipmentTypes = ['Domestic', 'International'];
@@ -228,7 +231,7 @@ const OvalButton = ({ children, className = '', style = {}, ...props }) => (
   </button>
 );
 
-const InputField = ({ label, type = 'text', name, value, onChange, required = false, placeholder = '', disabled = false }) => (
+const InputField = ({ label, type = 'text', name, value, onChange, required = false, placeholder = '', disabled = false, highlight = false }) => (
   <div>
     <label className="block text-sm font-medium text-slate-700 mb-1">
       {label}
@@ -242,12 +245,12 @@ const InputField = ({ label, type = 'text', name, value, onChange, required = fa
       placeholder={placeholder}
       required={required}
       disabled={disabled}
-      className={`w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${disabled ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
+        className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${highlight ? 'border-amber-400 bg-amber-50' : 'border-slate-300'} ${disabled ? 'bg-slate-100 text-slate-500' : ''}`}
     />
   </div>
 );
 
-const SelectField = ({ label, name, value, onChange, options, required = false, disabled = false }) => {
+      const SelectField = ({ label, name, value, onChange, options, required = false, disabled = false, highlight = false }) => {
   const normalize = (opt) => {
     if (typeof opt === 'string') return { value: opt, label: opt };
     return { value: opt.value ?? opt.code, label: opt.label ?? opt.name ?? opt.value ?? '' };
@@ -265,7 +268,7 @@ const SelectField = ({ label, name, value, onChange, options, required = false, 
         onChange={onChange}
         required={required}
         disabled={disabled}
-        className={`w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${disabled ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
+        className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${highlight ? 'border-amber-400 bg-amber-50' : 'border-slate-300'} ${disabled ? 'bg-slate-100 text-slate-500' : ''}`}
       >
         <option value="">-- Select {label} --</option>
         {options.map(opt => {
@@ -332,6 +335,26 @@ export function ShipmentForm({ shipment, onNavigate }) {
     tax: 0,
     total: 0,
   });
+  const { 
+    mode, 
+    setMode, 
+    shipmentDraft, 
+    updateShipmentDraft,
+    mergeExtractedData,
+    isFieldAutoFilled,
+    clearDraft
+  } = useShipmentDraftStore();
+
+  const isAutoFilled = (path) => isFieldAutoFilled(path);
+
+  const ensureArray = (arr) => Array.isArray(arr) ? arr : [];
+
+  const parseDims = (dims) => {
+    if (!dims) return {};
+    const match = String(dims).match(/(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)/);
+    if (!match) return {};
+    return { length: parseFloat(match[1]), width: parseFloat(match[2]), height: parseFloat(match[3]) };
+  };
 
   // HS code suggestion + validation state (per-product)
   const [hsSuggestions, setHsSuggestions] = useState({});
@@ -412,6 +435,24 @@ export function ShipmentForm({ shipment, onNavigate }) {
     });
     setExpandedSections(prev => ({ ...prev, shipper: true, service: true, packages: true }));
   };
+
+  // Sync formData with shipmentDraft on step changes and when draft changes
+  useEffect(() => {
+    if (shipment) return; // Don't override if editing existing shipment
+    
+    if (mode === 'auto' && shipmentDraft) {
+      console.log('[ShipmentForm] Syncing from shipmentDraft on step', currentStep, shipmentDraft);
+      setFormData(prev => ({
+        ...prev,
+        shipper: shipmentDraft.shipper?.company ? shipmentDraft.shipper : prev.shipper,
+        consignee: shipmentDraft.consignee?.company ? shipmentDraft.consignee : prev.consignee,
+        packages: shipmentDraft.packages?.length > 0 ? shipmentDraft.packages : prev.packages,
+        customsValue: shipmentDraft.customsValue || prev.customsValue,
+        currency: shipmentDraft.currency || prev.currency,
+        serviceLevel: shipmentDraft.serviceLevel || prev.serviceLevel,
+      }));
+    }
+  }, [shipment, mode, shipmentDraft, currentStep]);
 
   // Auto-fill shipper info and currency from database profile on load
   useEffect(() => {
@@ -607,14 +648,28 @@ export function ShipmentForm({ shipment, onNavigate }) {
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     const newValue = type === 'checkbox' ? checked : value;
-    setFormData(prev => ({ ...prev, [name]: newValue }));
+    setFormData(prev => {
+      const updated = { ...prev, [name]: newValue };
+      // Sync to global store if in auto mode
+      if (mode === 'auto') {
+        updateShipmentDraft(updated);
+      }
+      return updated;
+    });
   };
 
   const handleNestedChange = (parent, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [parent]: { ...prev[parent], [field]: value }
-    }));
+    setFormData(prev => {
+      const updated = {
+        ...prev,
+        [parent]: { ...prev[parent], [field]: value }
+      };
+      // Sync to global store if in auto mode
+      if (mode === 'auto') {
+        updateShipmentDraft(updated);
+      }
+      return updated;
+    });
   };
 
   const handleArrayChange = (arrayName, index, field, value) => {
@@ -622,7 +677,14 @@ export function ShipmentForm({ shipment, onNavigate }) {
       // Ensure the array exists and is an array
       const currentArray = Array.isArray(prev[arrayName]) ? prev[arrayName] : [];
       const newArray = [...currentArray];
+      const updated = { ...prev, [arrayName]: newArray };
       
+      // Sync to global store if in auto mode
+      if (mode === 'auto') {
+        updateShipmentDraft(updated);
+      }
+      
+      return updated
       // Ensure the item at index exists
       if (!newArray[index]) {
         newArray[index] = {};
@@ -653,6 +715,85 @@ export function ShipmentForm({ shipment, onNavigate }) {
         [arrayName]: currentArray.filter((_, i) => i !== index)
       };
     });
+  };
+
+  const applyExtractedData = (extracted) => {
+    if (!extracted) return;
+    console.log('[ShipmentForm] Applying extracted data:', extracted);
+    
+    // Merge into global store
+    const merged = mergeExtractedData(extracted);
+    console.log('[ShipmentForm] Merged data:', merged);
+    
+    // Validate and sanitize dropdown values - ensure they match available options
+    const validateDropdownValue = (value, options) => {
+      if (!value) return '';
+      const sanitized = String(value).trim();
+      // Find exact match in options
+      const found = options.find(opt => String(opt).toLowerCase() === sanitized.toLowerCase());
+      return found || '';
+    };
+
+    // Immediately sync to local formData with ALL extracted fields
+    setFormData(prev => {
+      const updated = {
+        ...prev,
+        // Basics fields
+        title: extracted.title || extracted.shipmentTitle || extracted.shipmentName || prev.title || '',
+        mode: validateDropdownValue(extracted.mode, modes) || prev.mode || 'Air',
+        shipmentType: validateDropdownValue(extracted.shipmentType, shipmentTypes) || prev.shipmentType || 'International',
+        pickupType: validateDropdownValue(extracted.pickupType, pickupTypes) || prev.pickupType || 'Scheduled Pickup',
+        
+        // Pickup/Delivery fields
+        pickupLocation: extracted.pickupLocation || extracted.pickupAddress || prev.pickupLocation || '',
+        pickupDate: extracted.pickupDate || prev.pickupDate || '',
+        pickupTimeEarliest: extracted.pickupTimeEarliest || extracted.pickupTimeStart || prev.pickupTimeEarliest || '',
+        pickupTimeLatest: extracted.pickupTimeLatest || extracted.pickupTimeEnd || prev.pickupTimeLatest || '',
+        estimatedDropoffDate: extracted.estimatedDropoffDate || extracted.dropoffDate || prev.estimatedDropoffDate || '',
+        
+        // Service fields
+        serviceLevel: validateDropdownValue(extracted.serviceLevel, serviceLevels) || prev.serviceLevel || 'Standard',
+        incoterm: validateDropdownValue(extracted.incoterm, incoterms) || prev.incoterm || 'FOB',
+        currency: validateDropdownValue(extracted.currency, currencies) || prev.currency || 'USD',
+        
+        // Shipper and consignee
+        shipper: merged.shipper || prev.shipper,
+        consignee: merged.consignee || prev.consignee,
+        
+        // Packages and products
+        packages: merged.packages || prev.packages,
+        
+        // Customs and value
+        customsValue: merged.customsValue || prev.customsValue || 0,
+        reasonForExport: validateDropdownValue(extracted.reasonForExport, reasonsForExport) || prev.reasonForExport || '',
+        
+        // Additional fields if available
+        billTo: validateDropdownValue(extracted.billTo, billToOptions) || prev.billTo || 'Shipper',
+        paymentTiming: validateDropdownValue(extracted.paymentTiming, paymentTimings) || prev.paymentTiming || 'Prepaid',
+        paymentMethod: validateDropdownValue(extracted.paymentMethod, paymentMethods) || prev.paymentMethod || 'Credit Card',
+        
+        // Notes and references
+        specialInstructions: extracted.specialInstructions || prev.specialInstructions || '',
+        insuranceRequired: extracted.insuranceRequired !== undefined ? extracted.insuranceRequired : prev.insuranceRequired,
+        dangerousGoods: extracted.dangerousGoods !== undefined ? extracted.dangerousGoods : prev.dangerousGoods,
+      };
+      console.log('[ShipmentForm] Updated formData with all extracted fields:', updated);
+      return updated;
+    });
+
+    // Expand relevant sections to show filled data
+    setExpandedSections(prev => ({ 
+      ...prev, 
+      basics: true, 
+      shipper: true, 
+      consignee: true, 
+      packages: true,
+      service: true,
+    }));
+
+    // Navigate to first step after extraction
+    setCurrentStep(1);
+    console.log('[ShipmentForm] Extraction applied, moved to step 1 with all fields populated');
   };
 
   // Calculate pricing and customs value
@@ -1222,6 +1363,22 @@ export function ShipmentForm({ shipment, onNavigate }) {
             </div>
             <div className="text-center text-sm text-slate-500 mt-4">Step {currentStep} of {steps.length}</div>
           </div>
+
+          {currentStep === 1 && (
+            <div className="mb-6">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+                <div>
+                  <p className="text-sm text-slate-600">Choose how to create your shipment:</p>
+                </div>
+                <AutoFillToggle mode={mode} onChange={setMode} />
+              </div>
+              {mode === 'auto' && (
+                <div className="mt-4">
+                  <DocumentUploadSection onExtracted={applyExtractedData} />
+                </div>
+              )}
+            </div>
+          )}
           {/* BASICS SECTION */}
           {currentStep === 1 && (
           <CollapsibleSection
@@ -1336,6 +1493,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 disabled={!shipperEditable}
                 required
                 placeholder="ABC Exports"
+                highlight={isAutoFilled('shipper.company')}
               />
               <InputField
                 label="Contact Name"
@@ -1370,6 +1528,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 onChange={(e) => handleNestedChange('shipper', 'address1', e.target.value)}
                 disabled={!shipperEditable}
                 placeholder="123 Manufacturing St"
+                highlight={isAutoFilled('shipper.address1')}
               />
               <InputField
                 label="Address Line 2"
@@ -1432,6 +1591,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 onChange={(e) => handleNestedChange('consignee', 'company', e.target.value)}
                 required
                 placeholder="Tech Imports Inc"
+                highlight={isAutoFilled('consignee.company')}
               />
               <InputField
                 label="Contact Name"
@@ -1462,6 +1622,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 value={formData.consignee?.address1 || ''}
                 onChange={(e) => handleNestedChange('consignee', 'address1', e.target.value)}
                 placeholder="456 Import Ave"
+                highlight={isAutoFilled('consignee.address1')}
               />
               <InputField
                 label="Address Line 2"
@@ -1497,6 +1658,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 value={formData.consignee?.country || ''}
                 onChange={(e) => handleNestedChange('consignee', 'country', e.target.value)}
                 options={countryOptions.map(c => ({ value: c.code, label: c.name }))}
+                highlight={isAutoFilled('consignee.country')}
               />
               
             </div>
@@ -1544,6 +1706,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                         name="length"
                         value={pkg.length || ''}
                         onChange={(e) => handleArrayChange('packages', pkgIdx, 'length', parseFloat(e.target.value))}
+                        highlight={pkgIdx === 0 && isAutoFilled('packages[0].length')}
                       />
                       <InputField
                         label="Width (cm)"
@@ -1551,6 +1714,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                         name="width"
                         value={pkg.width || ''}
                         onChange={(e) => handleArrayChange('packages', pkgIdx, 'width', parseFloat(e.target.value))}
+                        highlight={pkgIdx === 0 && isAutoFilled('packages[0].width')}
                       />
                       <InputField
                         label="Height (cm)"
@@ -1558,6 +1722,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                         name="height"
                         value={pkg.height || ''}
                         onChange={(e) => handleArrayChange('packages', pkgIdx, 'height', parseFloat(e.target.value))}
+                        highlight={pkgIdx === 0 && isAutoFilled('packages[0].height')}
                       />
                       <InputField
                         label="Weight"
@@ -1565,6 +1730,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                         name="weight"
                         value={pkg.weight || ''}
                         onChange={(e) => handleArrayChange('packages', pkgIdx, 'weight', parseFloat(e.target.value))}
+                        highlight={pkgIdx === 0 && isAutoFilled('packages[0].weight')}
                       />
                       <SelectField
                         label="Weight Unit"
@@ -1671,6 +1837,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                                     handleArrayChange('packages', pkgIdx, 'products', updatedProducts);
                                   }}
                                   placeholder="Product description"
+                                  highlight={pkgIdx === 0 && prodIdx === 0 && isAutoFilled('packages[0].products[0].description')}
                                 />
                               </div>
                               <div className="md:col-span-2">
@@ -1688,7 +1855,11 @@ export function ShipmentForm({ shipment, onNavigate }) {
                                       handleArrayChange('packages', pkgIdx, 'products', updatedProducts);
                                     }}
                                     placeholder="8541.10.00"
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                      pkgIdx === 0 && prodIdx === 0 && isAutoFilled('packages[0].products[0].hsCode')
+                                        ? 'border-amber-400 bg-amber-50'
+                                        : 'border-slate-300'
+                                    }`}
                                   />
 
                                   {/* HS code suggestions (AI) */}
@@ -1742,6 +1913,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                                   };
                                   handleArrayChange('packages', pkgIdx, 'products', updatedProducts);
                                 }}
+                                highlight={pkgIdx === 0 && prodIdx === 0 && isAutoFilled('packages[0].products[0].qty')}
                               />
                               <InputField
                                 label="Unit Price"
@@ -1772,6 +1944,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                                   handleArrayChange('packages', pkgIdx, 'products', updatedProducts);
                                 }}
                                 disabled
+                                highlight={pkgIdx === 0 && prodIdx === 0 && isAutoFilled('packages[0].products[0].totalValue')}
                               />
                               <SelectField
                                 label="Origin Country"
