@@ -1,0 +1,85 @@
+SHIPMENT DETAILS
+================
+
+Shipment Title: Electronic Components Shipment
+
+Shipper Information:
+Company: Electronics Inc.
+Contact Name: John Smith
+Address Line 1: 123 Tech Plaza, San Jose, CA 95110
+Address Line 2: Suite 100
+City: San Jose
+State/Province: California
+Postal Code: 95110
+Country: United States
+Phone: (408) 555-0100
+Email: john.smith@electronics.com
+Tax ID: 12-3456789
+
+Consignee Information:
+Company: Import Solutions Ltd.
+Contact Name: Maria Garcia
+Address Line 1: 456 Commerce Street
+Address Line 2: Building B, Floor 2
+City: Mexico City
+State/Province: Mexico
+Postal Code: 06500
+Country: Mexico
+Phone: (+52) 555-0200
+Email: maria.garcia@importsolutions.com
+Tax ID: MX-1234567
+
+Shipment Type: International
+Mode: Air
+Pickup Type: Scheduled Pickup
+Pickup Location: 123 Tech Plaza, San Jose, CA 95110
+Pickup Date: 2024-12-30
+Earliest Pickup Time: 08:00
+Latest Pickup Time: 12:00
+Service Level: Express
+Currency: USD
+Customs Value: 5000.00
+
+Package Information:
+Package Type: Box
+Dimensions: 30cm x 20cm x 15cm
+Weight: 5.5 kg
+Stackable: No
+
+Product 1:
+Product Name: Electronic Integrated Circuits
+Description: High-speed digital processors for industrial equipment
+HS Code: 8542.31.00
+Category: Electronics
+Quantity: 100
+Unit of Measure: pieces
+Unit Price: 25.50
+Total Value: 2550.00
+Origin Country: USA
+Reason for Export: Sale
+
+Product 2:
+Product Name: Circuit Board Assemblies
+Description: Pre-assembled circuit boards with soldered components
+HS Code: 8534.30.00
+Category: Electronics
+Quantity: 50
+Unit of Measure: pieces
+Unit Price: 18.75
+Total Value: 937.50
+Origin Country: USA
+Reason for Export: Sale
+
+Pickup Details:
+Pickup Location: 123 Tech Plaza, San Jose, CA 95110
+Pickup Date: 2024-12-30
+Earliest Pickup Time: 08:00
+Latest Pickup Time: 12:00
+
+Delivery Details:
+Estimated Delivery Date: 2025-01-05
+
+Additional Information:
+Insurance Required: Yes
+Dangerous Goods: No
+Special Instructions: Handle with care. Maintain temperature control during transport.

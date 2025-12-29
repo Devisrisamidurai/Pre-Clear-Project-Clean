@@ -78,9 +78,90 @@ export const useShipmentDraftStore = create(
           if (extracted.consignee.country) filled.push('consignee.country');
         }
 
-        // Products - merge with first package
-        if (extracted.products && Array.isArray(extracted.products) && extracted.products.length > 0) {
-          console.log('[shipmentDraftStore] Processing products array:', extracted.products);
+        // Products/Packages - CRITICAL: Handle both 'packages' array (primary) and 'products' (fallback)
+        // 'packages' is the primary structure from TextractService with full package + product hierarchy
+        if (extracted.packages && Array.isArray(extracted.packages) && extracted.packages.length > 0) {
+          console.log('[shipmentDraftStore] Processing PACKAGES array (primary structure):', extracted.packages);
+          
+          // Map each package with its products
+          const packages = extracted.packages.map((pkg, pkgIdx) => ({
+            id: pkg.id || `PKG-${Date.now()}-${pkgIdx}`,
+            type: pkg.type || pkg.packageType || 'Box',
+            length: pkg.length || pkg.Length || '',
+            width: pkg.width || pkg.Width || '',
+            height: pkg.height || pkg.Height || '',
+            dimUnit: pkg.dimUnit || pkg.DimensionUnit || 'cm',
+            weight: pkg.weight || pkg.Weight || '',
+            weightUnit: pkg.weightUnit || pkg.WeightUnit || 'kg',
+            stackable: pkg.stackable !== undefined ? pkg.stackable : (pkg.Stackable !== undefined ? pkg.Stackable : false),
+            products: (pkg.products || []).map((prod, prodIdx) => {
+              // Helper to normalize UOM values - convert extracted values to valid form options
+              const normalizeUOM = (value) => {
+                if (!value) return '';
+                const lower = String(value).toLowerCase().trim();
+                // Map extracted UOM to form options: ['kg', 'lb', 'pieces', 'meters', 'units', 'sets']
+                if (lower.includes('piece') || lower === 'pcs') return 'pieces';
+                if (lower.includes('kg') || lower.includes('kilogram')) return 'kg';
+                if (lower.includes('lb') || lower.includes('pound')) return 'lb';
+                if (lower.includes('meter') || lower === 'm') return 'meters';
+                if (lower.includes('unit')) return 'units';
+                if (lower.includes('set')) return 'sets';
+                return value; // Return as-is if no match
+              };
+
+              // Helper to normalize export reason - ensure it matches form options
+              const normalizeReason = (value) => {
+                if (!value) return '';
+                const lower = String(value).toLowerCase().trim();
+                // Map extracted reason to form options
+                if (lower === 'gift' || lower === 'sample gift') return 'Sending a gift';
+                if (lower === 'sale' || lower === 'commercial') return 'Commercial Trade';
+                if (lower === 'sample' || lower === 'prototype') return 'Sample/Prototype';
+                if (lower === 'return' || lower === 'repair') return 'Return/Repair';
+                if (lower === 'personal') return 'Personal Effects';
+                if (lower === 'temporary') return 'Temporary Import';
+                if (lower === 'exhibition') return 'Exhibition';
+                return value; // Return as-is if no match
+              };
+
+              return {
+                id: prod.id || `PROD-${Date.now()}-${pkgIdx}-${prodIdx}`,
+                name: prod.name || prod.Name || 'Extracted Product',
+                description: prod.description || prod.Description || '',
+                hsCode: prod.hsCode || prod.HsCode || '',
+                category: prod.category || prod.Category || '',
+                uom: normalizeUOM(prod.uom || prod.Unit || ''),
+                qty: prod.qty || prod.Quantity || '',
+                unitPrice: prod.unitPrice || prod.UnitPrice || '',
+                totalValue: prod.totalValue || prod.TotalValue || '',
+                originCountry: prod.originCountry || prod.OriginCountry || merged.shipper?.country || '',
+                reasonForExport: normalizeReason(prod.reasonForExport || prod.ExportReason || ''),
+              };
+            })
+          }));
+
+          merged.packages = packages;
+          
+          // Track which fields were auto-filled
+          extracted.packages.forEach((pkg, pkgIdx) => {
+            if (pkg.weight || pkg.Weight) filled.push(`packages[${pkgIdx}].weight`);
+            if (pkg.length || pkg.Length) filled.push(`packages[${pkgIdx}].length`);
+            if (pkg.width || pkg.Width) filled.push(`packages[${pkgIdx}].width`);
+            if (pkg.height || pkg.Height) filled.push(`packages[${pkgIdx}].height`);
+            
+            (pkg.products || []).forEach((prod, prodIdx) => {
+              if (prod.description || prod.Description) filled.push(`packages[${pkgIdx}].products[${prodIdx}].description`);
+              if (prod.hsCode || prod.HsCode) filled.push(`packages[${pkgIdx}].products[${prodIdx}].hsCode`);
+              if (prod.qty || prod.Quantity) filled.push(`packages[${pkgIdx}].products[${prodIdx}].qty`);
+              if (prod.totalValue || prod.TotalValue) filled.push(`packages[${pkgIdx}].products[${prodIdx}].totalValue`);
+            });
+          });
+
+          console.log('[shipmentDraftStore] Mapped', packages.length, 'packages with', packages.reduce((sum, p) => sum + (p.products?.length || 0), 0), 'total products');
+        } 
+        // Fallback: if no 'packages' array, process individual 'products' array
+        else if (extracted.products && Array.isArray(extracted.products) && extracted.products.length > 0) {
+          console.log('[shipmentDraftStore] Processing PRODUCTS array (fallback structure):', extracted.products);
           const packages = current.packages && current.packages.length > 0 ? [...current.packages] : [{
             id: `PKG-${Date.now()}`,
             type: 'Box',
