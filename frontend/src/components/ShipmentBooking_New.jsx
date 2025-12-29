@@ -4,6 +4,8 @@ import {
   AlertTriangle, ChevronDown, Plus, Trash2, FileText, Globe, Settings, Users
 } from 'lucide-react';
 import { shipmentsStore } from '../../store/shipmentsStore';
+import AutoFillToggle from './AutoFillToggle';
+import DocumentUploadSection from './DocumentUploadSection';
 
 const modes = ['Air', 'Sea', 'Road', 'Rail', 'Courier', 'Multimodal'];
 const shipmentTypes = ['Domestic', 'International'];
@@ -40,7 +42,7 @@ const CollapsibleSection = ({ title, isOpen, onToggle, children, icon: Icon }) =
   </div>
 );
 
-const InputField = ({ label, type = 'text', name, value, onChange, required = false, placeholder = '' }) => (
+const InputField = ({ label, type = 'text', name, value, onChange, required = false, placeholder = '', highlight = false }) => (
   <div>
     <label className="block text-sm font-medium text-slate-700 mb-1">
       {label}
@@ -53,12 +55,12 @@ const InputField = ({ label, type = 'text', name, value, onChange, required = fa
       onChange={onChange}
       placeholder={placeholder}
       required={required}
-      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+      className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${highlight ? 'border-amber-300 bg-amber-50' : 'border-slate-300'}`}
     />
   </div>
 );
 
-const SelectField = ({ label, name, value, onChange, options, required = false }) => (
+const SelectField = ({ label, name, value, onChange, options, required = false, highlight = false }) => (
   <div>
     <label className="block text-sm font-medium text-slate-700 mb-1">
       {label}
@@ -69,7 +71,7 @@ const SelectField = ({ label, name, value, onChange, options, required = false }
       value={value}
       onChange={onChange}
       required={required}
-      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+      className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${highlight ? 'border-amber-300 bg-amber-50' : 'border-slate-300'}`}
     >
       <option value="">-- Select {label} --</option>
       {options.map(opt => (
@@ -94,6 +96,7 @@ const CheckboxField = ({ label, name, checked, onChange }) => (
 
 export function ShipmentBooking_New({ shipment, onNavigate }) {
   const [formData, setFormData] = useState(shipment || {});
+  const [mode, setMode] = useState('manual'); // 'manual' | 'auto'
   const [expandedSections, setExpandedSections] = useState({
     basics: true,
     shipper: false,
@@ -114,6 +117,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
     tax: 0,
     total: 0,
   });
+  const [autoFilled, setAutoFilled] = useState({});
 
   const toggleSection = (section) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -152,6 +156,118 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
       ...prev,
       [arrayName]: prev[arrayName].filter((_, i) => i !== index)
     }));
+  };
+
+  const markAutoFilled = (paths) => {
+    setAutoFilled(prev => {
+      const next = { ...prev };
+      paths.forEach(p => { next[p] = true; });
+      return next;
+    });
+  };
+
+  const isAutoFilled = (path) => !!autoFilled[path];
+
+  const ensureArray = (arr) => Array.isArray(arr) ? arr : [];
+
+  const parseDims = (dims) => {
+    if (!dims) return {};
+    // e.g., "120x100x150 cm" or "120 x 100 x 150"
+    const match = String(dims).match(/(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)/);
+    if (!match) return {};
+    return { length: parseFloat(match[1]), width: parseFloat(match[2]), height: parseFloat(match[3]) };
+  };
+
+  const applyExtractedData = (extracted) => {
+    if (!extracted) return;
+    const updates = { ...formData };
+    const filled = [];
+
+    // Shipper
+    if (extracted.shipper) {
+      updates.shipper = {
+        ...(updates.shipper || {}),
+        company: extracted.shipper.name || updates.shipper?.company || '',
+        address1: extracted.shipper.address || updates.shipper?.address1 || '',
+      };
+      if (extracted.shipper.name) filled.push('shipper.company');
+      if (extracted.shipper.address) filled.push('shipper.address1');
+    }
+
+    // Consignee
+    if (extracted.consignee) {
+      updates.consignee = {
+        ...(updates.consignee || {}),
+        company: extracted.consignee.name || updates.consignee?.company || '',
+        address1: extracted.consignee.address || updates.consignee?.address1 || '',
+        country: extracted.consignee.country || updates.consignee?.country || '',
+      };
+      if (extracted.consignee.name) filled.push('consignee.company');
+      if (extracted.consignee.address) filled.push('consignee.address1');
+      if (extracted.consignee.country) filled.push('consignee.country');
+    }
+
+    // Products (first)
+    if (extracted.product) {
+      const products = ensureArray(updates.products);
+      const first = products[0] || {};
+      const qty = extracted.product.quantity ? parseFloat(extracted.product.quantity) : first.qty;
+      const totalValue = extracted.product.value ? parseFloat(extracted.product.value) : first.totalValue;
+      const name = first.name || 'Extracted Product';
+      const newFirst = {
+        ...first,
+        name,
+        description: extracted.product.description ?? first.description,
+        hsCode: extracted.product.hsCode ?? first.hsCode,
+        qty: qty ?? first.qty,
+        totalValue: totalValue ?? first.totalValue,
+      };
+      if (!products.length) products.push(newFirst); else products[0] = newFirst;
+      updates.products = products;
+      if (extracted.product.description) filled.push('products[0].description');
+      if (extracted.product.hsCode) filled.push('products[0].hsCode');
+      if (extracted.product.quantity) filled.push('products[0].qty');
+      if (extracted.product.value) filled.push('products[0].totalValue');
+    }
+
+    // Packages (first)
+    if (extracted.package) {
+      const packages = ensureArray(updates.packages);
+      const first = packages[0] || {};
+      const dims = parseDims(extracted.package.dimensions);
+      const newFirst = {
+        ...first,
+        type: first.type || 'Pallet',
+        weight: extracted.package.weight ? parseFloat(extracted.package.weight) : first.weight,
+        weightUnit: first.weightUnit || 'kg',
+        length: dims.length ?? first.length,
+        width: dims.width ?? first.width,
+        height: dims.height ?? first.height,
+        dimUnit: first.dimUnit || 'cm',
+      };
+      if (!packages.length) packages.push(newFirst); else packages[0] = newFirst;
+      updates.packages = packages;
+      if (extracted.package.weight) filled.push('packages[0].weight');
+      if (dims.length) filled.push('packages[0].length');
+      if (dims.width) filled.push('packages[0].width');
+      if (dims.height) filled.push('packages[0].height');
+    }
+
+    // Documents
+    if (extracted.documents) {
+      updates.documents = {
+        ...(updates.documents || {}),
+        invoiceNumber: extracted.documents.invoiceNumber || updates.documents?.invoiceNumber || '',
+        invoiceDate: extracted.documents.invoiceDate || updates.documents?.invoiceDate || '',
+      };
+      if (extracted.documents.invoiceNumber) filled.push('documents.invoiceNumber');
+      if (extracted.documents.invoiceDate) filled.push('documents.invoiceDate');
+    }
+
+    setFormData(updates);
+    markAutoFilled(filled);
+    // Optionally expand sections to show changes
+    setExpandedSections(prev => ({ ...prev, shipper: true, consignee: true, products: true, packages: true, documents: true }));
   };
 
   // Calculate pricing
@@ -233,13 +349,21 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
     <div className="max-w-6xl mx-auto">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-slate-900 mb-2 text-3xl font-bold">Shipment Details</h1>
-        <p className="text-slate-600">Complete all sections to proceed with your shipment</p>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <h1 className="text-slate-900 mb-2 text-3xl font-bold">Shipment Details</h1>
+            <p className="text-slate-600">Complete all sections to proceed with your shipment</p>
+          </div>
+          <AutoFillToggle mode={mode} onChange={setMode} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Main Form - 2 columns */}
         <div className="lg:col-span-2 space-y-6">
+          {mode === 'auto' && (
+            <DocumentUploadSection onExtracted={applyExtractedData} />
+          )}
           
           {/* BASICS SECTION */}
           <CollapsibleSection
@@ -256,6 +380,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 onChange={handleChange}
                 required
                 placeholder="REF-2024-001"
+                highlight={isAutoFilled('referenceId')}
               />
               <InputField
                 label="Shipment Title"
@@ -264,6 +389,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 onChange={handleChange}
                 required
                 placeholder="Electronic Components Shipment"
+                highlight={isAutoFilled('title')}
               />
               <SelectField
                 label="Mode of Transport"
@@ -272,6 +398,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 onChange={handleChange}
                 options={modes}
                 required
+                highlight={isAutoFilled('mode')}
               />
               <SelectField
                 label="Shipment Type"
@@ -280,6 +407,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 onChange={handleChange}
                 options={shipmentTypes}
                 required
+                highlight={isAutoFilled('shipmentType')}
               />
               <SelectField
                 label="Pickup Type"
@@ -287,6 +415,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.pickupType || ''}
                 onChange={handleChange}
                 options={pickupTypes}
+                highlight={isAutoFilled('pickupType')}
               />
               <InputField
                 label="Ship Date"
@@ -294,6 +423,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 name="shipDate"
                 value={formData.shipDate || ''}
                 onChange={handleChange}
+                highlight={isAutoFilled('shipDate')}
               />
               <InputField
                 label="Expected Delivery"
@@ -301,6 +431,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 name="expectedDelivery"
                 value={formData.expectedDelivery || ''}
                 onChange={handleChange}
+                highlight={isAutoFilled('expectedDelivery')}
               />
             </div>
           </CollapsibleSection>
@@ -320,6 +451,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 onChange={(e) => handleNestedChange('shipper', 'company', e.target.value)}
                 required
                 placeholder="ABC Exports"
+                highlight={isAutoFilled('shipper.company')}
               />
               <InputField
                 label="Contact Name"
@@ -327,6 +459,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.shipper?.contactName || ''}
                 onChange={(e) => handleNestedChange('shipper', 'contactName', e.target.value)}
                 placeholder="John Smith"
+                highlight={isAutoFilled('shipper.contactName')}
               />
               <InputField
                 label="Phone"
@@ -335,6 +468,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.shipper?.phone || ''}
                 onChange={(e) => handleNestedChange('shipper', 'phone', e.target.value)}
                 placeholder="+1-555-0001"
+                highlight={isAutoFilled('shipper.phone')}
               />
               <InputField
                 label="Email"
@@ -343,6 +477,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.shipper?.email || ''}
                 onChange={(e) => handleNestedChange('shipper', 'email', e.target.value)}
                 placeholder="john@company.com"
+                highlight={isAutoFilled('shipper.email')}
               />
               <InputField
                 label="Address Line 1"
@@ -350,6 +485,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.shipper?.address1 || ''}
                 onChange={(e) => handleNestedChange('shipper', 'address1', e.target.value)}
                 placeholder="123 Manufacturing St"
+                highlight={isAutoFilled('shipper.address1')}
               />
               <InputField
                 label="Address Line 2"
@@ -357,6 +493,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.shipper?.address2 || ''}
                 onChange={(e) => handleNestedChange('shipper', 'address2', e.target.value)}
                 placeholder="Suite 100"
+                highlight={isAutoFilled('shipper.address2')}
               />
               <InputField
                 label="City"
@@ -364,6 +501,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.shipper?.city || ''}
                 onChange={(e) => handleNestedChange('shipper', 'city', e.target.value)}
                 placeholder="Shanghai"
+                highlight={isAutoFilled('shipper.city')}
               />
               <InputField
                 label="State/Province"
@@ -371,6 +509,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.shipper?.state || ''}
                 onChange={(e) => handleNestedChange('shipper', 'state', e.target.value)}
                 placeholder="SH"
+                highlight={isAutoFilled('shipper.state')}
               />
               <InputField
                 label="Postal Code"
@@ -378,6 +517,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.shipper?.postalCode || ''}
                 onChange={(e) => handleNestedChange('shipper', 'postalCode', e.target.value)}
                 placeholder="200000"
+                highlight={isAutoFilled('shipper.postalCode')}
               />
               <SelectField
                 label="Country"
@@ -385,6 +525,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.shipper?.country || ''}
                 onChange={(e) => handleNestedChange('shipper', 'country', e.target.value)}
                 options={countries}
+                highlight={isAutoFilled('shipper.country')}
               />
               <InputField
                 label="Tax ID"
@@ -392,6 +533,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.shipper?.taxId || ''}
                 onChange={(e) => handleNestedChange('shipper', 'taxId', e.target.value)}
                 placeholder="CN123456789"
+                highlight={isAutoFilled('shipper.taxId')}
               />
               <div className="md:col-span-2">
                 <CheckboxField
@@ -419,6 +561,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 onChange={(e) => handleNestedChange('consignee', 'company', e.target.value)}
                 required
                 placeholder="Tech Imports Inc"
+                highlight={isAutoFilled('consignee.company')}
               />
               <InputField
                 label="Contact Name"
@@ -426,6 +569,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.consignee?.contactName || ''}
                 onChange={(e) => handleNestedChange('consignee', 'contactName', e.target.value)}
                 placeholder="Jane Doe"
+                highlight={isAutoFilled('consignee.contactName')}
               />
               <InputField
                 label="Phone"
@@ -434,6 +578,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.consignee?.phone || ''}
                 onChange={(e) => handleNestedChange('consignee', 'phone', e.target.value)}
                 placeholder="+1-555-0101"
+                highlight={isAutoFilled('consignee.phone')}
               />
               <InputField
                 label="Email"
@@ -442,6 +587,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.consignee?.email || ''}
                 onChange={(e) => handleNestedChange('consignee', 'email', e.target.value)}
                 placeholder="jane@company.com"
+                highlight={isAutoFilled('consignee.email')}
               />
               <InputField
                 label="Address Line 1"
@@ -449,6 +595,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.consignee?.address1 || ''}
                 onChange={(e) => handleNestedChange('consignee', 'address1', e.target.value)}
                 placeholder="456 Import Ave"
+                highlight={isAutoFilled('consignee.address1')}
               />
               <InputField
                 label="Address Line 2"
@@ -456,6 +603,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.consignee?.address2 || ''}
                 onChange={(e) => handleNestedChange('consignee', 'address2', e.target.value)}
                 placeholder="Floor 5"
+                highlight={isAutoFilled('consignee.address2')}
               />
               <InputField
                 label="City"
@@ -463,6 +611,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.consignee?.city || ''}
                 onChange={(e) => handleNestedChange('consignee', 'city', e.target.value)}
                 placeholder="New York"
+                highlight={isAutoFilled('consignee.city')}
               />
               <InputField
                 label="State/Province"
@@ -470,6 +619,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.consignee?.state || ''}
                 onChange={(e) => handleNestedChange('consignee', 'state', e.target.value)}
                 placeholder="NY"
+                highlight={isAutoFilled('consignee.state')}
               />
               <InputField
                 label="Postal Code"
@@ -477,6 +627,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.consignee?.postalCode || ''}
                 onChange={(e) => handleNestedChange('consignee', 'postalCode', e.target.value)}
                 placeholder="10001"
+                highlight={isAutoFilled('consignee.postalCode')}
               />
               <SelectField
                 label="Country"
@@ -484,6 +635,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.consignee?.country || ''}
                 onChange={(e) => handleNestedChange('consignee', 'country', e.target.value)}
                 options={countries}
+                highlight={isAutoFilled('consignee.country')}
               />
               <InputField
                 label="Tax ID"
@@ -491,6 +643,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.consignee?.taxId || ''}
                 onChange={(e) => handleNestedChange('consignee', 'taxId', e.target.value)}
                 placeholder="US987654321"
+                highlight={isAutoFilled('consignee.taxId')}
               />
               <div className="md:col-span-2">
                 <CheckboxField
@@ -529,6 +682,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       value={pkg.type || ''}
                       onChange={(e) => handleArrayChange('packages', idx, 'type', e.target.value)}
                       options={packageTypes}
+                      highlight={isAutoFilled(`packages[${idx}].type`)}
                     />
                     <InputField
                       label="Length (cm)"
@@ -536,6 +690,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       name="length"
                       value={pkg.length || ''}
                       onChange={(e) => handleArrayChange('packages', idx, 'length', parseFloat(e.target.value))}
+                      highlight={isAutoFilled(`packages[${idx}].length`)}
                     />
                     <InputField
                       label="Width (cm)"
@@ -543,6 +698,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       name="width"
                       value={pkg.width || ''}
                       onChange={(e) => handleArrayChange('packages', idx, 'width', parseFloat(e.target.value))}
+                      highlight={isAutoFilled(`packages[${idx}].width`)}
                     />
                     <InputField
                       label="Height (cm)"
@@ -550,6 +706,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       name="height"
                       value={pkg.height || ''}
                       onChange={(e) => handleArrayChange('packages', idx, 'height', parseFloat(e.target.value))}
+                      highlight={isAutoFilled(`packages[${idx}].height`)}
                     />
                     <InputField
                       label="Weight"
@@ -557,6 +714,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       name="weight"
                       value={pkg.weight || ''}
                       onChange={(e) => handleArrayChange('packages', idx, 'weight', parseFloat(e.target.value))}
+                      highlight={isAutoFilled(`packages[${idx}].weight`)}
                     />
                     <SelectField
                       label="Weight Unit"
@@ -564,6 +722,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       value={pkg.weightUnit || 'kg'}
                       onChange={(e) => handleArrayChange('packages', idx, 'weightUnit', e.target.value)}
                       options={['kg', 'lb']}
+                      highlight={isAutoFilled(`packages[${idx}].weightUnit`)}
                     />
                     <div className="md:col-span-3">
                       <CheckboxField
@@ -621,6 +780,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       value={product.name || ''}
                       onChange={(e) => handleArrayChange('products', idx, 'name', e.target.value)}
                       placeholder="Electronic Integrated Circuits"
+                      highlight={isAutoFilled(`products[${idx}].name`)}
                     />
                     <InputField
                       label="Description"
@@ -628,6 +788,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       value={product.description || ''}
                       onChange={(e) => handleArrayChange('products', idx, 'description', e.target.value)}
                       placeholder="Product description"
+                      highlight={isAutoFilled(`products[${idx}].description`)}
                     />
                     <InputField
                       label="HS Code"
@@ -635,6 +796,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       value={product.hsCode || ''}
                       onChange={(e) => handleArrayChange('products', idx, 'hsCode', e.target.value)}
                       placeholder="8541.10.00"
+                      highlight={isAutoFilled(`products[${idx}].hsCode`)}
                     />
                     <InputField
                       label="Category"
@@ -642,6 +804,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       value={product.category || ''}
                       onChange={(e) => handleArrayChange('products', idx, 'category', e.target.value)}
                       placeholder="Electronics"
+                      highlight={isAutoFilled(`products[${idx}].category`)}
                     />
                     <InputField
                       label="Quantity"
@@ -649,6 +812,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       name="qty"
                       value={product.qty || ''}
                       onChange={(e) => handleArrayChange('products', idx, 'qty', parseFloat(e.target.value))}
+                      highlight={isAutoFilled(`products[${idx}].qty`)}
                     />
                     <SelectField
                       label="Unit of Measure"
@@ -656,6 +820,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       value={product.uom || ''}
                       onChange={(e) => handleArrayChange('products', idx, 'uom', e.target.value)}
                       options={uoms}
+                      highlight={isAutoFilled(`products[${idx}].uom`)}
                     />
                     <InputField
                       label="Unit Price"
@@ -663,6 +828,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       name="unitPrice"
                       value={product.unitPrice || ''}
                       onChange={(e) => handleArrayChange('products', idx, 'unitPrice', parseFloat(e.target.value))}
+                      highlight={isAutoFilled(`products[${idx}].unitPrice`)}
                     />
                     <InputField
                       label="Total Value"
@@ -670,6 +836,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       name="totalValue"
                       value={product.totalValue || ''}
                       onChange={(e) => handleArrayChange('products', idx, 'totalValue', parseFloat(e.target.value))}
+                      highlight={isAutoFilled(`products[${idx}].totalValue`)}
                     />
                     <SelectField
                       label="Origin Country"
@@ -677,6 +844,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       value={product.originCountry || ''}
                       onChange={(e) => handleArrayChange('products', idx, 'originCountry', e.target.value)}
                       options={countries}
+                      highlight={isAutoFilled(`products[${idx}].originCountry`)}
                     />
                     <InputField
                       label="Reason for Export"
@@ -684,6 +852,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                       value={product.reasonForExport || ''}
                       onChange={(e) => handleArrayChange('products', idx, 'reasonForExport', e.target.value)}
                       placeholder="Commercial Trade"
+                      highlight={isAutoFilled(`products[${idx}].reasonForExport`)}
                     />
                   </div>
                 </div>
@@ -723,6 +892,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.serviceLevel || ''}
                 onChange={handleChange}
                 options={serviceLevels}
+                highlight={isAutoFilled('serviceLevel')}
               />
               <SelectField
                 label="Incoterm"
@@ -730,6 +900,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.incoterm || ''}
                 onChange={handleChange}
                 options={incoterms}
+                highlight={isAutoFilled('incoterm')}
               />
               <SelectField
                 label="Bill To"
@@ -737,6 +908,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.billTo || ''}
                 onChange={handleChange}
                 options={billToOptions}
+                highlight={isAutoFilled('billTo')}
               />
               <InputField
                 label="Billing Account Number"
@@ -744,6 +916,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.billingAccountNumber || ''}
                 onChange={handleChange}
                 placeholder="ACC-12345678"
+                highlight={isAutoFilled('billingAccountNumber')}
               />
               <SelectField
                 label="Currency"
@@ -751,6 +924,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.currency || 'USD'}
                 onChange={handleChange}
                 options={currencies}
+                highlight={isAutoFilled('currency')}
               />
               <InputField
                 label="Declared Value"
@@ -759,6 +933,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.declaredValue || ''}
                 onChange={handleChange}
                 required
+                highlight={isAutoFilled('declaredValue')}
               />
               <SelectField
                 label="Payment Timing"
@@ -766,6 +941,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.paymentTiming || ''}
                 onChange={handleChange}
                 options={paymentTimings}
+                highlight={isAutoFilled('paymentTiming')}
               />
               <SelectField
                 label="Payment Method"
@@ -773,6 +949,7 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 value={formData.paymentMethod || ''}
                 onChange={handleChange}
                 options={paymentMethods}
+                highlight={isAutoFilled('paymentMethod')}
               />
               <div className="md:col-span-2">
                 <CheckboxField
@@ -867,6 +1044,22 @@ export function ShipmentBooking_New({ shipment, onNavigate }) {
                 name="commercialInvoice"
                 checked={formData.documents?.commercialInvoice || false}
                 onChange={(e) => handleNestedChange('documents', 'commercialInvoice', e.target.checked)}
+              />
+              <InputField
+                label="Invoice Number"
+                name="invoiceNumber"
+                value={formData.documents?.invoiceNumber || ''}
+                onChange={(e) => handleNestedChange('documents', 'invoiceNumber', e.target.value)}
+                placeholder="INV-xxxxx"
+                highlight={isAutoFilled('documents.invoiceNumber')}
+              />
+              <InputField
+                label="Invoice Date"
+                type="date"
+                name="invoiceDate"
+                value={formData.documents?.invoiceDate || ''}
+                onChange={(e) => handleNestedChange('documents', 'invoiceDate', e.target.value)}
+                highlight={isAutoFilled('documents.invoiceDate')}
               />
               <CheckboxField
                 label="Packing List"

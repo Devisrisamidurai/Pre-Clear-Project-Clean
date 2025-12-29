@@ -10,6 +10,9 @@ import { createShipment, updateShipment } from '../../api/shipments';
 import { markShipmentDocument } from '../../api/documents';
 import { getProfile } from '../../api/auth';
 import { uploadShipmentDocument } from '../../api/documents';
+import AutoFillToggle from '../AutoFillToggle';
+import DocumentUploadSection from '../DocumentUploadSection';
+import { useShipmentDraftStore } from '../../store/shipmentDraftStore';
 
 const modes = ['Air', 'Sea', 'Road', 'Rail', 'Courier', 'Multimodal'];
 const shipmentTypes = ['Domestic', 'International'];
@@ -228,7 +231,7 @@ const OvalButton = ({ children, className = '', style = {}, ...props }) => (
   </button>
 );
 
-const InputField = ({ label, type = 'text', name, value, onChange, required = false, placeholder = '', disabled = false }) => (
+const InputField = ({ label, type = 'text', name, value, onChange, required = false, placeholder = '', disabled = false, highlight = false }) => (
   <div>
     <label className="block text-sm font-medium text-slate-700 mb-1">
       {label}
@@ -242,12 +245,12 @@ const InputField = ({ label, type = 'text', name, value, onChange, required = fa
       placeholder={placeholder}
       required={required}
       disabled={disabled}
-      className={`w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${disabled ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
+        className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${highlight ? 'border-amber-400 bg-amber-50' : 'border-slate-300'} ${disabled ? 'bg-slate-100 text-slate-500' : ''}`}
     />
   </div>
 );
 
-const SelectField = ({ label, name, value, onChange, options, required = false, disabled = false }) => {
+      const SelectField = ({ label, name, value, onChange, options, required = false, disabled = false, highlight = false }) => {
   const normalize = (opt) => {
     if (typeof opt === 'string') return { value: opt, label: opt };
     return { value: opt.value ?? opt.code, label: opt.label ?? opt.name ?? opt.value ?? '' };
@@ -265,7 +268,7 @@ const SelectField = ({ label, name, value, onChange, options, required = false, 
         onChange={onChange}
         required={required}
         disabled={disabled}
-        className={`w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${disabled ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
+        className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${highlight ? 'border-amber-400 bg-amber-50' : 'border-slate-300'} ${disabled ? 'bg-slate-100 text-slate-500' : ''}`}
       >
         <option value="">-- Select {label} --</option>
         {options.map(opt => {
@@ -293,14 +296,36 @@ const CheckboxField = ({ label, name, checked, onChange }) => (
 );
 
 export function ShipmentForm({ shipment, onNavigate }) {
-  // Initialize form data with default values for all array fields
-  const [formData, setFormData] = useState(() => ({
-    packages: [],
-    products: [],
-    documents: [],
-    documentRequests: [],
-    ...shipment
-  }));
+  // Initialize form data - START COMPLETELY EMPTY for new shipments
+  // Only populate from shipment prop if editing existing shipment
+  const [formData, setFormData] = useState(() => {
+    if (shipment) {
+      // If editing existing shipment, spread it
+      return {
+        packages: shipment.packages || [],
+        products: shipment.products || [],
+        documents: shipment.documents || [],
+        documentRequests: shipment.documentRequests || [],
+        ...shipment
+      };
+    }
+    // NEW SHIPMENT: Start completely empty - no default shipper/consignee/packages
+    return {
+      shipper: null,
+      consignee: null,
+      packages: [],
+      products: [],
+      documents: [],
+      documentRequests: [],
+      title: '',
+      mode: '',
+      shipmentType: '',
+      serviceLevel: '',
+      customsValue: 0,
+      currency: 'USD',
+      weight: ''
+    };
+  });
   const [profileCountry, setProfileCountry] = useState('');
   const [profileCurrency, setProfileCurrency] = useState('USD');
   const [profileData, setProfileData] = useState(null);
@@ -332,6 +357,26 @@ export function ShipmentForm({ shipment, onNavigate }) {
     tax: 0,
     total: 0,
   });
+  const { 
+    mode, 
+    setMode, 
+    shipmentDraft, 
+    updateShipmentDraft,
+    mergeExtractedData,
+    isFieldAutoFilled,
+    clearDraft
+  } = useShipmentDraftStore();
+
+  const isAutoFilled = (path) => isFieldAutoFilled(path);
+
+  const ensureArray = (arr) => Array.isArray(arr) ? arr : [];
+
+  const parseDims = (dims) => {
+    if (!dims) return {};
+    const match = String(dims).match(/(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)/);
+    if (!match) return {};
+    return { length: parseFloat(match[1]), width: parseFloat(match[2]), height: parseFloat(match[3]) };
+  };
 
   // HS code suggestion + validation state (per-product)
   const [hsSuggestions, setHsSuggestions] = useState({});
@@ -359,6 +404,8 @@ export function ShipmentForm({ shipment, onNavigate }) {
 
 
   // Apply profile data into the form (used on load and when profile changes)
+  // IMPORTANT: Only stores profile metadata (country, currency) - does NOT auto-populate shipper/consignee/packages
+  // Sidebar must show empty state until user enters data or extraction populates it
   const applyProfileToForm = (profile) => {
     // Extract shipper profile data from API response
     const shipperProfile = profile?.profile || {};
@@ -368,52 +415,27 @@ export function ShipmentForm({ shipment, onNavigate }) {
     setProfileCurrency(currency);
     setProfileData(profile);
 
-    // Only overwrite locked fields when shipper is not being edited manually
+    // ONLY set currency from profile - do NOT auto-populate shipper/consignee/packages
+    // This ensures clean empty sidebar on new shipments
     setFormData(prev => {
-      const nextShipper = shipperEditable ? prev.shipper || {} : {
-        ...prev.shipper,
-        company: profile.company ?? prev.shipper?.company ?? '',
-        contactName: `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || prev.shipper?.contactName || '',
-        phone: profile.phone ?? prev.shipper?.phone ?? '',
-        email: profile.email ?? prev.shipper?.email ?? '',
-        address1: shipperProfile.addressLine1 ?? prev.shipper?.address1 ?? '',
-        address2: shipperProfile.addressLine2 ?? prev.shipper?.address2 ?? '',
-        city: shipperProfile.city ?? prev.shipper?.city ?? '',
-        state: shipperProfile.state ?? prev.shipper?.state ?? '',
-        postalCode: shipperProfile.postalCode ?? prev.shipper?.postalCode ?? '',
-        country: prev.shipper?.country || countryCode,
-        taxId: prev.shipper?.taxId || ''
-      };
-
-      const resolvedCurrency = prev.currency || currency;
-      // Initialize packages if not present
-      const updatedPackages = prev.packages && prev.packages.length > 0 ? prev.packages : [
-        {
-          id: `PKG-${Date.now()}`,
-          type: '',
-          length: '',
-          width: '',
-          height: '',
-          dimUnit: 'cm',
-          weight: '',
-          weightUnit: 'kg',
-          stackable: false,
-          products: [],
-        }
-      ];
-
       return {
         ...prev,
-        shipper: nextShipper,
-        currency: resolvedCurrency,
-        serviceLevel: prev.serviceLevel || 'Standard',
-        packages: updatedPackages,
+        currency: prev.currency || currency,
       };
     });
-    setExpandedSections(prev => ({ ...prev, shipper: true, service: true, packages: true }));
   };
 
-  // Auto-fill shipper info and currency from database profile on load
+  // Sync formData with shipmentDraft on step changes and when draft changes
+  // DISABLED: Do not auto-sync from draft on new shipments to keep sidebar empty
+  // Only populate when user explicitly uploads documents with extraction
+  useEffect(() => {
+    // Intentionally disabled to keep sidebar clean on new shipments
+    // if (shipment) return;
+    // if (mode === 'auto' && shipmentDraft) { ... }
+  }, [shipment, mode, shipmentDraft, currentStep]);
+
+  // Load profile metadata (country, currency only) from database on load
+  // Does NOT auto-populate shipper/consignee/packages to keep sidebar clean
   useEffect(() => {
     if (shipment) return; // Don't override if editing existing shipment
     
@@ -437,7 +459,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
     
     loadProfileFromDB();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shipment, shipperEditable]);
+  }, [shipment]);
 
   // Listen for profile changes (storage events / tab visibility) to refresh shipper info
   useEffect(() => {
@@ -607,14 +629,28 @@ export function ShipmentForm({ shipment, onNavigate }) {
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     const newValue = type === 'checkbox' ? checked : value;
-    setFormData(prev => ({ ...prev, [name]: newValue }));
+    setFormData(prev => {
+      const updated = { ...prev, [name]: newValue };
+      // Sync to global store if in auto mode
+      if (mode === 'auto') {
+        updateShipmentDraft(updated);
+      }
+      return updated;
+    });
   };
 
   const handleNestedChange = (parent, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [parent]: { ...prev[parent], [field]: value }
-    }));
+    setFormData(prev => {
+      const updated = {
+        ...prev,
+        [parent]: { ...prev[parent], [field]: value }
+      };
+      // Sync to global store if in auto mode
+      if (mode === 'auto') {
+        updateShipmentDraft(updated);
+      }
+      return updated;
+    });
   };
 
   const handleArrayChange = (arrayName, index, field, value) => {
@@ -629,7 +665,14 @@ export function ShipmentForm({ shipment, onNavigate }) {
       }
       
       newArray[index] = { ...newArray[index], [field]: value };
-      return { ...prev, [arrayName]: newArray };
+      const updated = { ...prev, [arrayName]: newArray };
+      
+      // Sync to global store if in auto mode
+      if (mode === 'auto') {
+        updateShipmentDraft(updated);
+      }
+      
+      return updated;
     });
   };
 
@@ -653,6 +696,85 @@ export function ShipmentForm({ shipment, onNavigate }) {
         [arrayName]: currentArray.filter((_, i) => i !== index)
       };
     });
+  };
+
+  const applyExtractedData = (extracted) => {
+    if (!extracted) return;
+    console.log('[ShipmentForm] Applying extracted data:', extracted);
+    
+    // Merge into global store
+    const merged = mergeExtractedData(extracted);
+    console.log('[ShipmentForm] Merged data:', merged);
+    
+    // Validate and sanitize dropdown values - ensure they match available options
+    const validateDropdownValue = (value, options) => {
+      if (!value) return '';
+      const sanitized = String(value).trim();
+      // Find exact match in options
+      const found = options.find(opt => String(opt).toLowerCase() === sanitized.toLowerCase());
+      return found || '';
+    };
+
+    // Immediately sync to local formData with ALL extracted fields
+    setFormData(prev => {
+      const updated = {
+        ...prev,
+        // Basics fields
+        title: extracted.title || extracted.shipmentTitle || extracted.shipmentName || prev.title || '',
+        mode: validateDropdownValue(extracted.mode, modes) || prev.mode || 'Air',
+        shipmentType: validateDropdownValue(extracted.shipmentType, shipmentTypes) || prev.shipmentType || 'International',
+        pickupType: validateDropdownValue(extracted.pickupType, pickupTypes) || prev.pickupType || 'Scheduled Pickup',
+        
+        // Pickup/Delivery fields
+        pickupLocation: extracted.pickupLocation || extracted.pickupAddress || prev.pickupLocation || '',
+        pickupDate: extracted.pickupDate || prev.pickupDate || '',
+        pickupTimeEarliest: extracted.pickupTimeEarliest || extracted.pickupTimeStart || prev.pickupTimeEarliest || '',
+        pickupTimeLatest: extracted.pickupTimeLatest || extracted.pickupTimeEnd || prev.pickupTimeLatest || '',
+        estimatedDropoffDate: extracted.estimatedDropoffDate || extracted.dropoffDate || prev.estimatedDropoffDate || '',
+        
+        // Service fields
+        serviceLevel: validateDropdownValue(extracted.serviceLevel, serviceLevels) || prev.serviceLevel || 'Standard',
+        incoterm: validateDropdownValue(extracted.incoterm, incoterms) || prev.incoterm || 'FOB',
+        currency: validateDropdownValue(extracted.currency, currencies) || prev.currency || 'USD',
+        
+        // Shipper and consignee
+        shipper: merged.shipper || prev.shipper,
+        consignee: merged.consignee || prev.consignee,
+        
+        // Packages and products
+        packages: merged.packages || prev.packages,
+        
+        // Customs and value
+        customsValue: merged.customsValue || prev.customsValue || 0,
+        reasonForExport: validateDropdownValue(extracted.reasonForExport, reasonsForExport) || prev.reasonForExport || '',
+        
+        // Additional fields if available
+        billTo: validateDropdownValue(extracted.billTo, billToOptions) || prev.billTo || 'Shipper',
+        paymentTiming: validateDropdownValue(extracted.paymentTiming, paymentTimings) || prev.paymentTiming || 'Prepaid',
+        paymentMethod: validateDropdownValue(extracted.paymentMethod, paymentMethods) || prev.paymentMethod || 'Credit Card',
+        
+        // Notes and references
+        specialInstructions: extracted.specialInstructions || prev.specialInstructions || '',
+        insuranceRequired: extracted.insuranceRequired !== undefined ? extracted.insuranceRequired : prev.insuranceRequired,
+        dangerousGoods: extracted.dangerousGoods !== undefined ? extracted.dangerousGoods : prev.dangerousGoods,
+      };
+      console.log('[ShipmentForm] Updated formData with all extracted fields:', updated);
+      return updated;
+    });
+
+    // Expand relevant sections to show filled data
+    setExpandedSections(prev => ({ 
+      ...prev, 
+      basics: true, 
+      shipper: true, 
+      consignee: true, 
+      packages: true,
+      service: true,
+    }));
+
+    // Navigate to first step after extraction
+    setCurrentStep(1);
+    console.log('[ShipmentForm] Extraction applied, moved to step 1 with all fields populated');
   };
 
   // Calculate pricing and customs value
@@ -1222,6 +1344,22 @@ export function ShipmentForm({ shipment, onNavigate }) {
             </div>
             <div className="text-center text-sm text-slate-500 mt-4">Step {currentStep} of {steps.length}</div>
           </div>
+
+          {currentStep === 1 && (
+            <div className="mb-6">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+                <div>
+                  <p className="text-sm text-slate-600">Choose how to create your shipment:</p>
+                </div>
+                <AutoFillToggle mode={mode} onChange={setMode} />
+              </div>
+              {mode === 'auto' && (
+                <div className="mt-4">
+                  <DocumentUploadSection onExtracted={applyExtractedData} />
+                </div>
+              )}
+            </div>
+          )}
           {/* BASICS SECTION */}
           {currentStep === 1 && (
           <CollapsibleSection
@@ -1336,6 +1474,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 disabled={!shipperEditable}
                 required
                 placeholder="ABC Exports"
+                highlight={isAutoFilled('shipper.company')}
               />
               <InputField
                 label="Contact Name"
@@ -1370,6 +1509,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 onChange={(e) => handleNestedChange('shipper', 'address1', e.target.value)}
                 disabled={!shipperEditable}
                 placeholder="123 Manufacturing St"
+                highlight={isAutoFilled('shipper.address1')}
               />
               <InputField
                 label="Address Line 2"
@@ -1432,6 +1572,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 onChange={(e) => handleNestedChange('consignee', 'company', e.target.value)}
                 required
                 placeholder="Tech Imports Inc"
+                highlight={isAutoFilled('consignee.company')}
               />
               <InputField
                 label="Contact Name"
@@ -1462,6 +1603,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 value={formData.consignee?.address1 || ''}
                 onChange={(e) => handleNestedChange('consignee', 'address1', e.target.value)}
                 placeholder="456 Import Ave"
+                highlight={isAutoFilled('consignee.address1')}
               />
               <InputField
                 label="Address Line 2"
@@ -1497,6 +1639,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 value={formData.consignee?.country || ''}
                 onChange={(e) => handleNestedChange('consignee', 'country', e.target.value)}
                 options={countryOptions.map(c => ({ value: c.code, label: c.name }))}
+                highlight={isAutoFilled('consignee.country')}
               />
               
             </div>
@@ -1544,6 +1687,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                         name="length"
                         value={pkg.length || ''}
                         onChange={(e) => handleArrayChange('packages', pkgIdx, 'length', parseFloat(e.target.value))}
+                        highlight={pkgIdx === 0 && isAutoFilled('packages[0].length')}
                       />
                       <InputField
                         label="Width (cm)"
@@ -1551,6 +1695,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                         name="width"
                         value={pkg.width || ''}
                         onChange={(e) => handleArrayChange('packages', pkgIdx, 'width', parseFloat(e.target.value))}
+                        highlight={pkgIdx === 0 && isAutoFilled('packages[0].width')}
                       />
                       <InputField
                         label="Height (cm)"
@@ -1558,6 +1703,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                         name="height"
                         value={pkg.height || ''}
                         onChange={(e) => handleArrayChange('packages', pkgIdx, 'height', parseFloat(e.target.value))}
+                        highlight={pkgIdx === 0 && isAutoFilled('packages[0].height')}
                       />
                       <InputField
                         label="Weight"
@@ -1565,6 +1711,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                         name="weight"
                         value={pkg.weight || ''}
                         onChange={(e) => handleArrayChange('packages', pkgIdx, 'weight', parseFloat(e.target.value))}
+                        highlight={pkgIdx === 0 && isAutoFilled('packages[0].weight')}
                       />
                       <SelectField
                         label="Weight Unit"
@@ -1671,6 +1818,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                                     handleArrayChange('packages', pkgIdx, 'products', updatedProducts);
                                   }}
                                   placeholder="Product description"
+                                  highlight={pkgIdx === 0 && prodIdx === 0 && isAutoFilled('packages[0].products[0].description')}
                                 />
                               </div>
                               <div className="md:col-span-2">
@@ -1688,7 +1836,11 @@ export function ShipmentForm({ shipment, onNavigate }) {
                                       handleArrayChange('packages', pkgIdx, 'products', updatedProducts);
                                     }}
                                     placeholder="8541.10.00"
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                      pkgIdx === 0 && prodIdx === 0 && isAutoFilled('packages[0].products[0].hsCode')
+                                        ? 'border-amber-400 bg-amber-50'
+                                        : 'border-slate-300'
+                                    }`}
                                   />
 
                                   {/* HS code suggestions (AI) */}
@@ -1742,6 +1894,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                                   };
                                   handleArrayChange('packages', pkgIdx, 'products', updatedProducts);
                                 }}
+                                highlight={pkgIdx === 0 && prodIdx === 0 && isAutoFilled('packages[0].products[0].qty')}
                               />
                               <InputField
                                 label="Unit Price"
@@ -1772,6 +1925,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
                                   handleArrayChange('packages', pkgIdx, 'products', updatedProducts);
                                 }}
                                 disabled
+                                highlight={pkgIdx === 0 && prodIdx === 0 && isAutoFilled('packages[0].products[0].totalValue')}
                               />
                               <SelectField
                                 label="Origin Country"
@@ -2069,7 +2223,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
               <div>
                 <h3 className="font-semibold mb-3" style={{ background: '#EAD8C3', color: '#2F1B17', padding: '0.35rem 0.5rem', borderRadius: '0.25rem' }}>Shipment Overview</h3>
                 <div className="space-y-2 text-sm">
-                  {formData.title && (
+                  {formData.title && formData.title.trim() !== '' && (
                     <div className="flex justify-between pb-2 border-b border-slate-200">
                       <span className="text-slate-600">Shipment Title:</span>
                       <span className="text-slate-900 font-semibold">{formData.title}</span>
@@ -2078,15 +2232,15 @@ export function ShipmentForm({ shipment, onNavigate }) {
                   
                   <div className="flex justify-between">
                     <span className="text-slate-600">Mode:</span>
-                    <span className="text-slate-900">{formData.mode || '—'}</span>
+                    <span className="text-slate-900">{formData.mode && formData.mode.trim() !== '' ? formData.mode : '—'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Type:</span>
-                    <span className="text-slate-900">{formData.shipmentType || '—'}</span>
+                    <span className="text-slate-900">{formData.shipmentType && formData.shipmentType.trim() !== '' ? formData.shipmentType : '—'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Service:</span>
-                    <span className="text-slate-900">{formData.serviceLevel || '—'}</span>
+                    <span className="text-slate-900">{formData.serviceLevel && formData.serviceLevel.trim() !== '' ? formData.serviceLevel : '—'}</span>
                   </div>
                 </div>
               </div>
@@ -2096,11 +2250,11 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 <div className="space-y-3 text-sm">
                   <div>
                     <p className="text-slate-600 mb-1">Shipper:</p>
-                    <p className="text-slate-900 font-medium">{formData.shipper?.company || 'Not specified'}</p>
+                    <p className="text-slate-900 font-medium">{formData.shipper?.company ? formData.shipper.company : '—'}</p>
                   </div>
                   <div>
                     <p className="text-slate-600 mb-1">Consignee:</p>
-                    <p className="text-slate-900 font-medium">{formData.consignee?.company || 'Not specified'}</p>
+                    <p className="text-slate-900 font-medium">{formData.consignee?.company ? formData.consignee.company : '—'}</p>
                   </div>
                 </div>
               </div>
@@ -2110,17 +2264,24 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-slate-600">Packages:</span>
-                    <span className="text-slate-900 font-semibold">{formData.packages?.length || 0}</span>
+                    <span className="text-slate-900 font-semibold">
+                      {(formData.packages?.length ?? 0) > 0 ? formData.packages.length : '—'}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Total Products:</span>
                     <span className="text-slate-900 font-semibold">
-                      {formData.packages?.reduce((sum, pkg) => sum + (pkg.products?.length || 0), 0) || 0}
+                      {(() => {
+                        const totalProducts = formData.packages?.reduce((sum, pkg) => sum + (pkg.products?.length || 0), 0) || 0;
+                        return totalProducts > 0 ? totalProducts : '—';
+                      })()}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Total Weight:</span>
-                    <span className="text-slate-900">{formData.weight} kg</span>
+                    <span className="text-slate-900">
+                      {formData.weight && formData.weight !== '' && formData.weight !== '0' ? `${formData.weight} kg` : '—'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -2131,7 +2292,9 @@ export function ShipmentForm({ shipment, onNavigate }) {
                   
                   <div className="flex justify-between">
                     <span className="text-slate-600">Customs Value:</span>
-                    <span className="text-slate-900">{formData.currency } {(formData.customsValue || 0).toFixed(2)}</span>
+                    <span className="text-slate-900">
+                      {formData.customsValue && formData.customsValue > 0 ? `${formData.currency || 'USD'} ${parseFloat(formData.customsValue).toFixed(2)}` : '—'}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Base Price:</span>
