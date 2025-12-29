@@ -658,6 +658,13 @@ export function ShipmentForm({ shipment, onNavigate }) {
       // Ensure the array exists and is an array
       const currentArray = Array.isArray(prev[arrayName]) ? prev[arrayName] : [];
       const newArray = [...currentArray];
+      
+      // Ensure the item at index exists
+      if (!newArray[index]) {
+        newArray[index] = {};
+      }
+      
+      newArray[index] = { ...newArray[index], [field]: value };
       const updated = { ...prev, [arrayName]: newArray };
       
       // Sync to global store if in auto mode
@@ -665,14 +672,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
         updateShipmentDraft(updated);
       }
       
-      return updated
-      // Ensure the item at index exists
-      if (!newArray[index]) {
-        newArray[index] = {};
-      }
-      
-      newArray[index] = { ...newArray[index], [field]: value };
-      return { ...prev, [arrayName]: newArray };
+      return updated;
     });
   };
 
