@@ -105,6 +105,12 @@ export function ShipmentDetails({ shipment, onNavigate, loadingOverride = false,
           const data = await getShipmentById(routeId);
           // API returns normalized shipment; use it directly
           if (!cancelled) {
+            console.log('[ShipmentDetails] Loaded shipment data:', data);
+            console.log('[ShipmentDetails] Shipper data:', data?.shipper);
+            console.log('[ShipmentDetails] Shipper company:', data?.shipper?.company);
+            console.log('[ShipmentDetails] Shipper contactName:', data?.shipper?.contactName);
+            console.log('[ShipmentDetails] Shipper email:', data?.shipper?.email);
+            console.log('[ShipmentDetails] Shipper phone:', data?.shipper?.phone);
             setCurrentShipment(data);
             setIsLoading(false);
           }
@@ -1014,29 +1020,32 @@ export function ShipmentDetails({ shipment, onNavigate, loadingOverride = false,
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-slate-500 text-sm mb-1">Company</p>
-                  <p className="text-slate-900">{shipmentData.shipper?.company || 'N/A'}</p>
+                  <p className="text-slate-900">{shipmentData.shipper?.company || <span className="text-red-500">Missing</span>}</p>
                 </div>
                 <div>
                   <p className="text-slate-500 text-sm mb-1">Contact Name</p>
-                  <p className="text-slate-900">{shipmentData.shipper?.contactName || 'N/A'}</p>
+                  <p className="text-slate-900">{shipmentData.shipper?.contactName || <span className="text-red-500">Missing</span>}</p>
                 </div>
                 <div>
                   <p className="text-slate-500 text-sm mb-1">Email</p>
-                  <p className="text-slate-900">{shipmentData.shipper?.email || 'N/A'}</p>
+                  <p className="text-slate-900">{shipmentData.shipper?.email || <span className="text-red-500">Missing</span>}</p>
                 </div>
                 <div>
                   <p className="text-slate-500 text-sm mb-1">Phone</p>
-                  <p className="text-slate-900">{shipmentData.shipper?.phone || 'N/A'}</p>
+                  <p className="text-slate-900">{shipmentData.shipper?.phone || <span className="text-red-500">Missing</span>}</p>
                 </div>
                 <div className="col-span-2">
                   <p className="text-slate-500 text-sm mb-1">Address</p>
                   <p className="text-slate-900">
-                    {[shipmentData.shipper?.address1, shipmentData.shipper?.address2].filter(Boolean).join(' ')}, {shipmentData.shipper?.city}, {shipmentData.shipper?.state} {shipmentData.shipper?.postalCode}
+                    {(() => {
+                      const parts = [shipmentData.shipper?.address1, shipmentData.shipper?.address2, shipmentData.shipper?.city, shipmentData.shipper?.state, shipmentData.shipper?.postalCode].filter(Boolean);
+                      return parts.length > 0 ? parts.join(', ') : <span className="text-red-500">Missing</span>;
+                    })()}
                   </p>
                 </div>
                 <div>
                   <p className="text-slate-500 text-sm mb-1">Country</p>
-                  <p className="text-slate-900">{shipmentData.shipper?.country || 'N/A'}</p>
+                  <p className="text-slate-900">{shipmentData.shipper?.country || <span className="text-red-500">Missing</span>}</p>
                 </div>
                 
               </div>
