@@ -29,7 +29,7 @@ import {
 import { useShipments } from '../../hooks/useShipments';
 import { getShipmentById, pollShipmentStatus, submitAi, updateShipmentStatus as apiUpdateShipmentStatus, generateToken as apiGenerateToken, assignBroker, deleteShipment } from '../../api/shipments';
 import http, { getAuthToken } from '../../api/http';
-import { uploadShipmentDocument, listShipmentDocuments, downloadShipmentDocument } from '../../api/documents';
+import { uploadShipmentDocument, listShipmentDocuments, downloadShipmentDocument, getDocumentRequests } from '../../api/documents';
 import { ShipmentChatPanel } from '../ShipmentChatPanel';
 import { shipmentsStore } from '../../store/shipmentsStore';
 import { getCurrencyByCountry, formatCurrency } from '../../utils/validation';
@@ -77,6 +77,8 @@ export function ShipmentDetails({ shipment, onNavigate, loadingOverride = false,
   const [uploadingAdditionalDoc, setUploadingAdditionalDoc] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(100);
   const [deletingDocId, setDeletingDocId] = useState(null);
+  const [documentRequests, setDocumentRequests] = useState([]);
+  const [loadingDocumentRequests, setLoadingDocumentRequests] = useState(false);
   
   // Initialize from props and set loading state
   // Sync loading/error overrides from parent route
@@ -179,7 +181,18 @@ export function ShipmentDetails({ shipment, onNavigate, loadingOverride = false,
     if (!currentShipment?.id) return;
     let intervalId;
 
-    const shouldPoll = (s) => s?.AiApprovalStatus === 'pending' || s?.BrokerApprovalStatus === 'pending' || s?.aiApprovalStatus === 'pending' || s?.brokerApprovalStatus === 'pending' || s?.status === 'ai-review';
+    const shouldPoll = (s) => {
+      return s?.AiApprovalStatus === 'pending' || 
+             s?.BrokerApprovalStatus === 'pending' || 
+             s?.aiApprovalStatus === 'pending' || 
+             s?.brokerApprovalStatus === 'pending' || 
+             s?.brokerApprovalStatus === 'documents-requested' ||
+             s?.BrokerApprovalStatus === 'documents-requested' ||
+             s?.status === 'ai-review' ||
+             s?.status === 'documents-requested' ||
+             s?.status === 'documents-uploaded' ||
+             s?.status === 'awaiting-broker';
+    };
 
     const poll = async () => {
       try {
@@ -214,7 +227,7 @@ export function ShipmentDetails({ shipment, onNavigate, loadingOverride = false,
     const fetchDocumentRequests = async () => {
       try {
         setLoadingDocumentRequests(true);
-        const requests = await listShipmentDocumentRequests(currentShipment.id);
+        const requests = await getDocumentRequests(currentShipment.id);
         setDocumentRequests(Array.isArray(requests) ? requests : []);
       } catch (err) {
         console.error('Failed to fetch document requests:', err);
@@ -343,6 +356,17 @@ export function ShipmentDetails({ shipment, onNavigate, loadingOverride = false,
       const refreshed = shipmentsStore.getShipmentById(currentShipment.id) || shipmentFromStore;
       setCurrentShipment(refreshed);
       console.log('[handleFileSelect] State updated, doc marked as uploaded:', docKey);
+      
+      // Refresh shipment status from backend to get documents-uploaded status
+      try {
+        const freshData = await getShipmentById(currentShipment.id);
+        if (freshData) {
+          setCurrentShipment(prev => ({ ...prev, ...freshData, status: freshData.status, brokerApprovalStatus: freshData.brokerApprovalStatus }));
+          shipmentsStore.saveShipment(freshData);
+        }
+      } catch (refreshErr) {
+        console.warn('[handleFileSelect] Could not refresh shipment status:', refreshErr);
+      }
     } catch (err) {
       console.error('[handleFileSelect] Upload failed:', err);
       setError(`Failed to upload ${docName}: ${err.message}`);
@@ -449,6 +473,17 @@ export function ShipmentDetails({ shipment, onNavigate, loadingOverride = false,
       // Refresh the documents list
       const updatedDocs = await listShipmentDocuments(currentShipment.id);
       setS3Docs(Array.isArray(updatedDocs) ? updatedDocs : []);
+      
+      // Refresh shipment status to reflect documents-uploaded status
+      try {
+        const freshData = await getShipmentById(currentShipment.id);
+        if (freshData) {
+          setCurrentShipment(prev => ({ ...prev, ...freshData, status: freshData.status, brokerApprovalStatus: freshData.brokerApprovalStatus }));
+          shipmentsStore.saveShipment(freshData);
+        }
+      } catch (refreshErr) {
+        console.warn('[handleUploadAdditionalDocument] Could not refresh shipment status:', refreshErr);
+      }
     } catch (err) {
       console.error('[handleUploadAdditionalDocument] Upload failed:', err);
       setError(`Failed to upload additional document: ${err.message}`);
@@ -640,7 +675,12 @@ export function ShipmentDetails({ shipment, onNavigate, loadingOverride = false,
   };
 
   const handleRequestBrokerApproval = async () => {
+    // Safety: Only allow broker assignment after AI approval
     if (!currentShipment?.id) return;
+    if (aiApproval !== 'approved') {
+      setError('Complete AI evaluation before requesting broker review.');
+      return;
+    }
     try {
       setRequestingBroker(true);
       setError(null);
@@ -854,7 +894,7 @@ export function ShipmentDetails({ shipment, onNavigate, loadingOverride = false,
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => onNavigate && onNavigate('create-shipment', currentShipment)}
+              onClick={() => onNavigate && onNavigate('shipment-form', currentShipment)}
               title="Edit Shipment"
               className="px-3 py-2 bg-slate-100 text-slate-800 rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2 border border-slate-300"
             >
@@ -891,9 +931,20 @@ export function ShipmentDetails({ shipment, onNavigate, loadingOverride = false,
           </div>
           {/* Step 3: Broker Approval */}
           <div className="flex-1">
-            <div className={`w-full h-2 rounded-full ${brokerApproval === 'approved' ? 'bg-green-500' : brokerApproval === 'pending' ? 'bg-blue-500' : brokerApproval === 'documents-requested' ? 'bg-red-500' : 'bg-slate-200'}`} />
+            <div className={`w-full h-2 rounded-full ${
+              brokerApproval === 'approved' ? 'bg-green-500' : 
+              brokerApproval === 'pending' || currentShipment?.status === 'documents-uploaded' ? 'bg-blue-500' : 
+              brokerApproval === 'documents-requested' || currentShipment?.status === 'documents-requested' ? 'bg-red-500' : 
+              'bg-slate-200'
+            }`} />
             <p className="text-sm text-slate-600 mt-2">Broker Review</p>
-            <p className="text-xs text-slate-500">{brokerApproval === 'approved' ? 'Approved' : brokerApproval === 'pending' ? 'In Review' : brokerApproval === 'documents-requested' ? 'Docs Needed' : 'Not Started'}</p>
+            <p className="text-xs text-slate-500">{
+              brokerApproval === 'approved' ? 'Approved' : 
+              brokerApproval === 'pending' ? 'In Review' : 
+              currentShipment?.status === 'documents-uploaded' ? 'Docs Uploaded' :
+              brokerApproval === 'documents-requested' || currentShipment?.status === 'documents-requested' ? 'Docs Requested' : 
+              'Not Started'
+            }</p>
           </div>
           {/* Step 4: Token */}
           <div className="flex-1">
@@ -1556,13 +1607,14 @@ export function ShipmentDetails({ shipment, onNavigate, loadingOverride = false,
                 <span className="text-slate-600 text-sm">Broker Review</span>
                 <span className={`px-2 py-1 rounded text-xs ${
                   brokerApproval === 'approved' ? 'bg-green-100 text-green-700' : 
-                  brokerApproval === 'pending' ? 'bg-blue-100 text-blue-700' :
-                  brokerApproval === 'documents-requested' ? 'bg-red-100 text-red-700' :
+                  brokerApproval === 'pending' || currentShipment?.status === 'documents-uploaded' ? 'bg-blue-100 text-blue-700' :
+                  brokerApproval === 'documents-requested' || currentShipment?.status === 'documents-requested' ? 'bg-red-100 text-red-700' :
                   'bg-slate-100 text-slate-600'
                 }`}>
                   {brokerApproval === 'approved' ? 'Approved' : 
                    brokerApproval === 'pending' ? 'In Review' :
-                   brokerApproval === 'documents-requested' ? 'Docs Needed' :
+                   currentShipment?.status === 'documents-uploaded' ? 'Docs Uploaded' :
+                   brokerApproval === 'documents-requested' || currentShipment?.status === 'documents-requested' ? 'Docs Requested' :
                    'Pending'}
                 </span>
               </div>

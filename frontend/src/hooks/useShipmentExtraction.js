@@ -77,6 +77,8 @@ export function useShipmentExtraction() {
         shipper: hasData(json.shipper),
         consignee: hasData(json.consignee),
         products: hasData(json.products),
+        // CRITICAL: Check for 'packages' array which is the primary multi-product/multi-package structure
+        packages: hasData(json.packages),
         product: hasData(json.product),
         package: hasData(json.package),
         customsValue: json.customsValue != null && json.customsValue > 0,
@@ -88,6 +90,7 @@ export function useShipmentExtraction() {
       console.log('[useShipmentExtraction] 📊 Extracted data summary:', {
         shipper: json.shipper,
         consignee: json.consignee,
+        packages: json.packages,
         products: json.products,
         customsValue: json.customsValue,
         currency: json.currency,

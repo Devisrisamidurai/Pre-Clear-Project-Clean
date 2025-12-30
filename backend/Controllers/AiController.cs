@@ -128,8 +128,12 @@ namespace PreClear.Api.Controllers
                     // Addresses
                     shipper = extractedData.ContainsKey("shipper") ? extractedData["shipper"] : null,
                     consignee = extractedData.ContainsKey("consignee") ? extractedData["consignee"] : null,
-                    // Products and packages
+                    // Products and packages - CRITICAL: return both formats for compatibility
+                    // 'packages' is the primary array with full structure (each package contains products[])
+                    packages = extractedData.ContainsKey("packages") ? extractedData["packages"] : null,
+                    // 'products' is kept for backward compatibility (flat list)
                     products = extractedData.ContainsKey("products") ? extractedData["products"] : null,
+                    // 'package' is kept for backward compatibility (single package details)
                     package = extractedData.ContainsKey("package") ? extractedData["package"] : null,
                     // Customs and value
                     customsValue = extractedData.ContainsKey("customsValue") ? extractedData["customsValue"] : null,

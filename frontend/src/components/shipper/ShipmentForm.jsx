@@ -296,18 +296,50 @@ const CheckboxField = ({ label, name, checked, onChange }) => (
 );
 
 export function ShipmentForm({ shipment, onNavigate }) {
-  // Initialize form data with default values for all array fields
-  const [formData, setFormData] = useState(() => ({
-    packages: [],
-    products: [],
-    documents: [],
-    documentRequests: [],
-    ...shipment
-  }));
+  const normalizeShipment = (raw) => {
+    if (!raw) return null;
+    const normalizedId = raw.id ?? raw.Id ?? raw.shipmentId ?? raw.ShipmentId ?? raw.shipment_id;
+    return {
+      ...raw,
+      id: normalizedId,
+      referenceId: raw.referenceId ?? raw.ReferenceId ?? raw.reference_id,
+      shipper: raw.shipper || {},
+      consignee: raw.consignee || {},
+      packages: raw.packages || [],
+      products: raw.products || [],
+      documents: raw.documents || [],
+      documentRequests: raw.documentRequests || [],
+    };
+  };
+
+  // Initialize form data - START COMPLETELY EMPTY for new shipments
+  // Only populate from shipment prop if editing existing shipment
+  const [formData, setFormData] = useState(() => {
+    const normalized = normalizeShipment(shipment);
+    if (normalized) return normalized;
+    // NEW SHIPMENT: Start completely empty - no default shipper/consignee/packages
+    return {
+      // Initialize party objects so nested edits always have a target
+      shipper: {},
+      consignee: {},
+      packages: [],
+      products: [],
+      documents: [],
+      documentRequests: [],
+      title: '',
+      mode: '',
+      shipmentType: '',
+      serviceLevel: '',
+      customsValue: 0,
+      currency: 'USD',
+      weight: ''
+    };
+  });
   const [profileCountry, setProfileCountry] = useState('');
   const [profileCurrency, setProfileCurrency] = useState('USD');
   const [profileData, setProfileData] = useState(null);
-  const [shipperEditable, setShipperEditable] = useState(false);
+  // Allow shipper fields to be edited by default on new shipments; lock only when editing an existing shipment
+  const [shipperEditable, setShipperEditable] = useState(!shipment);
   const [expandedSections, setExpandedSections] = useState({
     basics: true,
     shipper: false,
@@ -382,6 +414,8 @@ export function ShipmentForm({ shipment, onNavigate }) {
 
 
   // Apply profile data into the form (used on load and when profile changes)
+  // IMPORTANT: Only stores profile metadata (country, currency) - does NOT auto-populate shipper/consignee/packages
+  // Sidebar must show empty state until user enters data or extraction populates it
   const applyProfileToForm = (profile) => {
     // Extract shipper profile data from API response
     const shipperProfile = profile?.profile || {};
@@ -391,70 +425,27 @@ export function ShipmentForm({ shipment, onNavigate }) {
     setProfileCurrency(currency);
     setProfileData(profile);
 
-    // Only overwrite locked fields when shipper is not being edited manually
+    // ONLY set currency from profile - do NOT auto-populate shipper/consignee/packages
+    // This ensures clean empty sidebar on new shipments
     setFormData(prev => {
-      const nextShipper = shipperEditable ? prev.shipper || {} : {
-        ...prev.shipper,
-        company: profile.company ?? prev.shipper?.company ?? '',
-        contactName: `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || prev.shipper?.contactName || '',
-        phone: profile.phone ?? prev.shipper?.phone ?? '',
-        email: profile.email ?? prev.shipper?.email ?? '',
-        address1: shipperProfile.addressLine1 ?? prev.shipper?.address1 ?? '',
-        address2: shipperProfile.addressLine2 ?? prev.shipper?.address2 ?? '',
-        city: shipperProfile.city ?? prev.shipper?.city ?? '',
-        state: shipperProfile.state ?? prev.shipper?.state ?? '',
-        postalCode: shipperProfile.postalCode ?? prev.shipper?.postalCode ?? '',
-        country: prev.shipper?.country || countryCode,
-        taxId: prev.shipper?.taxId || ''
-      };
-
-      const resolvedCurrency = prev.currency || currency;
-      // Initialize packages if not present
-      const updatedPackages = prev.packages && prev.packages.length > 0 ? prev.packages : [
-        {
-          id: `PKG-${Date.now()}`,
-          type: '',
-          length: '',
-          width: '',
-          height: '',
-          dimUnit: 'cm',
-          weight: '',
-          weightUnit: 'kg',
-          stackable: false,
-          products: [],
-        }
-      ];
-
       return {
         ...prev,
-        shipper: nextShipper,
-        currency: resolvedCurrency,
-        serviceLevel: prev.serviceLevel || 'Standard',
-        packages: updatedPackages,
+        currency: prev.currency || currency,
       };
     });
-    setExpandedSections(prev => ({ ...prev, shipper: true, service: true, packages: true }));
   };
 
   // Sync formData with shipmentDraft on step changes and when draft changes
+  // DISABLED: Do not auto-sync from draft on new shipments to keep sidebar empty
+  // Only populate when user explicitly uploads documents with extraction
   useEffect(() => {
-    if (shipment) return; // Don't override if editing existing shipment
-    
-    if (mode === 'auto' && shipmentDraft) {
-      console.log('[ShipmentForm] Syncing from shipmentDraft on step', currentStep, shipmentDraft);
-      setFormData(prev => ({
-        ...prev,
-        shipper: shipmentDraft.shipper?.company ? shipmentDraft.shipper : prev.shipper,
-        consignee: shipmentDraft.consignee?.company ? shipmentDraft.consignee : prev.consignee,
-        packages: shipmentDraft.packages?.length > 0 ? shipmentDraft.packages : prev.packages,
-        customsValue: shipmentDraft.customsValue || prev.customsValue,
-        currency: shipmentDraft.currency || prev.currency,
-        serviceLevel: shipmentDraft.serviceLevel || prev.serviceLevel,
-      }));
-    }
+    // Intentionally disabled to keep sidebar clean on new shipments
+    // if (shipment) return;
+    // if (mode === 'auto' && shipmentDraft) { ... }
   }, [shipment, mode, shipmentDraft, currentStep]);
 
-  // Auto-fill shipper info and currency from database profile on load
+  // Load profile metadata (country, currency only) from database on load
+  // Does NOT auto-populate shipper/consignee/packages to keep sidebar clean
   useEffect(() => {
     if (shipment) return; // Don't override if editing existing shipment
     
@@ -478,7 +469,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
     
     loadProfileFromDB();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shipment, shipperEditable]);
+  }, [shipment]);
 
   // Listen for profile changes (storage events / tab visibility) to refresh shipper info
   useEffect(() => {
@@ -662,7 +653,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
     setFormData(prev => {
       const updated = {
         ...prev,
-        [parent]: { ...prev[parent], [field]: value }
+        [parent]: { ...(prev[parent] || {}), [field]: value }
       };
       // Sync to global store if in auto mode
       if (mode === 'auto') {
@@ -677,6 +668,13 @@ export function ShipmentForm({ shipment, onNavigate }) {
       // Ensure the array exists and is an array
       const currentArray = Array.isArray(prev[arrayName]) ? prev[arrayName] : [];
       const newArray = [...currentArray];
+      
+      // Ensure the item at index exists
+      if (!newArray[index]) {
+        newArray[index] = {};
+      }
+      
+      newArray[index] = { ...newArray[index], [field]: value };
       const updated = { ...prev, [arrayName]: newArray };
       
       // Sync to global store if in auto mode
@@ -684,14 +682,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
         updateShipmentDraft(updated);
       }
       
-      return updated
-      // Ensure the item at index exists
-      if (!newArray[index]) {
-        newArray[index] = {};
-      }
-      
-      newArray[index] = { ...newArray[index], [field]: value };
-      return { ...prev, [arrayName]: newArray };
+      return updated;
     });
   };
 
@@ -2242,7 +2233,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
               <div>
                 <h3 className="font-semibold mb-3" style={{ background: '#EAD8C3', color: '#2F1B17', padding: '0.35rem 0.5rem', borderRadius: '0.25rem' }}>Shipment Overview</h3>
                 <div className="space-y-2 text-sm">
-                  {formData.title && (
+                  {formData.title && formData.title.trim() !== '' && (
                     <div className="flex justify-between pb-2 border-b border-slate-200">
                       <span className="text-slate-600">Shipment Title:</span>
                       <span className="text-slate-900 font-semibold">{formData.title}</span>
@@ -2251,15 +2242,15 @@ export function ShipmentForm({ shipment, onNavigate }) {
                   
                   <div className="flex justify-between">
                     <span className="text-slate-600">Mode:</span>
-                    <span className="text-slate-900">{formData.mode || '—'}</span>
+                    <span className="text-slate-900">{formData.mode && formData.mode.trim() !== '' ? formData.mode : '—'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Type:</span>
-                    <span className="text-slate-900">{formData.shipmentType || '—'}</span>
+                    <span className="text-slate-900">{formData.shipmentType && formData.shipmentType.trim() !== '' ? formData.shipmentType : '—'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Service:</span>
-                    <span className="text-slate-900">{formData.serviceLevel || '—'}</span>
+                    <span className="text-slate-900">{formData.serviceLevel && formData.serviceLevel.trim() !== '' ? formData.serviceLevel : '—'}</span>
                   </div>
                 </div>
               </div>
@@ -2269,11 +2260,11 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 <div className="space-y-3 text-sm">
                   <div>
                     <p className="text-slate-600 mb-1">Shipper:</p>
-                    <p className="text-slate-900 font-medium">{formData.shipper?.company || 'Not specified'}</p>
+                    <p className="text-slate-900 font-medium">{formData.shipper?.company ? formData.shipper.company : '—'}</p>
                   </div>
                   <div>
                     <p className="text-slate-600 mb-1">Consignee:</p>
-                    <p className="text-slate-900 font-medium">{formData.consignee?.company || 'Not specified'}</p>
+                    <p className="text-slate-900 font-medium">{formData.consignee?.company ? formData.consignee.company : '—'}</p>
                   </div>
                 </div>
               </div>
@@ -2283,17 +2274,24 @@ export function ShipmentForm({ shipment, onNavigate }) {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-slate-600">Packages:</span>
-                    <span className="text-slate-900 font-semibold">{formData.packages?.length || 0}</span>
+                    <span className="text-slate-900 font-semibold">
+                      {(formData.packages?.length ?? 0) > 0 ? formData.packages.length : '—'}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Total Products:</span>
                     <span className="text-slate-900 font-semibold">
-                      {formData.packages?.reduce((sum, pkg) => sum + (pkg.products?.length || 0), 0) || 0}
+                      {(() => {
+                        const totalProducts = formData.packages?.reduce((sum, pkg) => sum + (pkg.products?.length || 0), 0) || 0;
+                        return totalProducts > 0 ? totalProducts : '—';
+                      })()}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Total Weight:</span>
-                    <span className="text-slate-900">{formData.weight} kg</span>
+                    <span className="text-slate-900">
+                      {formData.weight && formData.weight !== '' && formData.weight !== '0' ? `${formData.weight} kg` : '—'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -2304,7 +2302,9 @@ export function ShipmentForm({ shipment, onNavigate }) {
                   
                   <div className="flex justify-between">
                     <span className="text-slate-600">Customs Value:</span>
-                    <span className="text-slate-900">{formData.currency } {(formData.customsValue || 0).toFixed(2)}</span>
+                    <span className="text-slate-900">
+                      {formData.customsValue && formData.customsValue > 0 ? `${formData.currency || 'USD'} ${parseFloat(formData.customsValue).toFixed(2)}` : '—'}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Base Price:</span>
