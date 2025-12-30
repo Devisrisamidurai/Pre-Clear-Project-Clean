@@ -296,19 +296,27 @@ const CheckboxField = ({ label, name, checked, onChange }) => (
 );
 
 export function ShipmentForm({ shipment, onNavigate }) {
+  const normalizeShipment = (raw) => {
+    if (!raw) return null;
+    const normalizedId = raw.id ?? raw.Id ?? raw.shipmentId ?? raw.ShipmentId ?? raw.shipment_id;
+    return {
+      ...raw,
+      id: normalizedId,
+      referenceId: raw.referenceId ?? raw.ReferenceId ?? raw.reference_id,
+      shipper: raw.shipper || {},
+      consignee: raw.consignee || {},
+      packages: raw.packages || [],
+      products: raw.products || [],
+      documents: raw.documents || [],
+      documentRequests: raw.documentRequests || [],
+    };
+  };
+
   // Initialize form data - START COMPLETELY EMPTY for new shipments
   // Only populate from shipment prop if editing existing shipment
   const [formData, setFormData] = useState(() => {
-    if (shipment) {
-      // If editing existing shipment, spread it
-      return {
-        packages: shipment.packages || [],
-        products: shipment.products || [],
-        documents: shipment.documents || [],
-        documentRequests: shipment.documentRequests || [],
-        ...shipment
-      };
-    }
+    const normalized = normalizeShipment(shipment);
+    if (normalized) return normalized;
     // NEW SHIPMENT: Start completely empty - no default shipper/consignee/packages
     return {
       // Initialize party objects so nested edits always have a target
