@@ -176,10 +176,9 @@ namespace PreClear.Api.Controllers
             {
                 var created = await _service.CreateAsync(dto);
                 
-                // Automatically assign broker based on shipment details
-                await _brokerAssignment.AssignBrokerAsync(created.Id);
+                // Broker assignment removed - now triggered manually via "Request Broker Review" button after AI approval
 
-                // Reload shipment with updated assignment
+                // Reload shipment details
                 var updated = await _service.GetDetailAsync(created.Id);
                 if (updated == null) return StatusCode(500, new { error = "internal_error" });
                 var normalized = MapNormalized(updated);

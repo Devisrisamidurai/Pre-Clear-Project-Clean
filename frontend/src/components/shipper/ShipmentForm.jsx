@@ -311,8 +311,9 @@ export function ShipmentForm({ shipment, onNavigate }) {
     }
     // NEW SHIPMENT: Start completely empty - no default shipper/consignee/packages
     return {
-      shipper: null,
-      consignee: null,
+      // Initialize party objects so nested edits always have a target
+      shipper: {},
+      consignee: {},
       packages: [],
       products: [],
       documents: [],
@@ -329,7 +330,8 @@ export function ShipmentForm({ shipment, onNavigate }) {
   const [profileCountry, setProfileCountry] = useState('');
   const [profileCurrency, setProfileCurrency] = useState('USD');
   const [profileData, setProfileData] = useState(null);
-  const [shipperEditable, setShipperEditable] = useState(false);
+  // Allow shipper fields to be edited by default on new shipments; lock only when editing an existing shipment
+  const [shipperEditable, setShipperEditable] = useState(!shipment);
   const [expandedSections, setExpandedSections] = useState({
     basics: true,
     shipper: false,
@@ -643,7 +645,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
     setFormData(prev => {
       const updated = {
         ...prev,
-        [parent]: { ...prev[parent], [field]: value }
+        [parent]: { ...(prev[parent] || {}), [field]: value }
       };
       // Sync to global store if in auto mode
       if (mode === 'auto') {

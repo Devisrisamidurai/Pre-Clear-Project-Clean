@@ -98,6 +98,46 @@ namespace PreClear.Api.Services
             var created = await _repo.AddAsync(doc);
             created.DownloadUrl = BuildDownloadUrlPlaceholder(created.Id);
 
+            // Check if this upload fulfills a document request
+            var pendingRequests = await _repo.GetDocumentRequestsByShipmentAsync(shipmentId);
+            var hasPendingRequests = pendingRequests.Any(r => r.Status == "pending");
+            
+            if (hasPendingRequests)
+            {
+                // Update shipment status to documents-uploaded when shipper responds to request
+                shipment.Status = "documents-uploaded";
+                shipment.BrokerApprovalStatus = "pending";
+                shipment.UpdatedAt = DateTime.UtcNow;
+                await _shipmentRepo.UpdateAsync(shipment);
+                _logger.LogInformation("Updated shipment {ShipmentId} status to documents-uploaded", shipmentId);
+
+                // Notify the broker who requested the documents (fallback to assigned broker)
+                var targetBrokerId = pendingRequests.FirstOrDefault(r => r.Status == "pending")?.RequestedByBrokerId;
+                if (!targetBrokerId.HasValue && shipment.AssignedBrokerId.HasValue)
+                {
+                    targetBrokerId = shipment.AssignedBrokerId.Value;
+                }
+
+                if (targetBrokerId.HasValue)
+                {
+                    try
+                    {
+                        await _notificationService.CreateNotificationAsync(
+                            targetBrokerId.Value,
+                            "documents_uploaded",
+                            "Documents Uploaded",
+                            $"Shipper has uploaded requested documents for shipment #{shipmentId}. Please review.",
+                            shipmentId
+                        );
+                        _logger.LogInformation("Notified broker {BrokerId} about document upload for shipment {ShipmentId}", targetBrokerId.Value, shipmentId);
+                    }
+                    catch (Exception notifEx)
+                    {
+                        _logger.LogWarning(notifEx, "Failed to notify broker {BrokerId} about document upload for shipment {ShipmentId}", targetBrokerId.Value, shipmentId);
+                    }
+                }
+            }
+
             _logger.LogInformation("Uploaded document {DocId} for shipment {ShipmentId} to storage path {Path}", created.Id, shipmentId, storedPath);
             return created;
         }
@@ -303,6 +343,13 @@ namespace PreClear.Api.Services
                 
                 if (shipment != null)
                 {
+                    // Update shipment status to documents-requested
+                    shipment.Status = "documents-requested";
+                    shipment.BrokerApprovalStatus = "documents-requested";
+                    shipment.UpdatedAt = DateTime.UtcNow;
+                    await _shipmentRepo.UpdateAsync(shipment);
+                    _logger.LogInformation("Updated shipment {ShipmentId} status to documents-requested", shipmentId);
+
                     var shipperId = shipment.CreatedBy;
                     var title = "Additional Documents Requested";
                     var messageText = string.IsNullOrWhiteSpace(message)

@@ -331,12 +331,26 @@ export function useShipments() {
         console.log('[useShipments.brokerRequestDocuments] Calling API with:', { shipmentId: id, names, message });
         const resp = await requestShipmentDocuments(id, names, message);
         console.log('[useShipments.brokerRequestDocuments] API response:', resp);
-        const shipment = shipmentsStore.getShipmentById(id);
-        if (shipment) {
-          shipment.status = 'document-requested';
-          shipment.brokerApproval = 'documents-requested';
-          shipmentsStore.saveShipment(shipment);
+        
+        // Refresh shipment from backend to get updated status
+        try {
+          const updatedShipment = await getShipmentById(id);
+          if (updatedShipment) {
+            shipmentsStore.saveShipment(updatedShipment);
+          }
+        } catch (refreshErr) {
+          console.warn('[useShipments.brokerRequestDocuments] Could not refresh shipment:', refreshErr);
+          // Fallback: update store manually
+          const shipment = shipmentsStore.getShipmentById(id);
+          if (shipment) {
+            shipment.status = 'documents-requested';
+            shipment.brokerApproval = 'documents-requested';
+            shipment.brokerApprovalStatus = 'documents-requested';
+            shipment.BrokerApprovalStatus = 'documents-requested';
+            shipmentsStore.saveShipment(shipment);
+          }
         }
+        
         return resp; // { success: true, request }
       } catch (e) {
         console.error('[useShipments.brokerRequestDocuments] Error:', e);

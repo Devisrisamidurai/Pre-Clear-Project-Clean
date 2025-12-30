@@ -27,6 +27,14 @@ export function ShipmentTracking() {
   }, []);
 
   const getStatusDisplay = (shipment) => {
+    // Check shipment status first
+    if (shipment.status === 'documents-requested') {
+      return 'Documents Requested';
+    }
+    if (shipment.status === 'documents-uploaded') {
+      return 'Documents Uploaded';
+    }
+    
     const aiStatus = shipment.aiApprovalStatus === 'approved' ? 'AI Approved' : 
                     shipment.aiApprovalStatus === 'rejected' ? 'AI Rejected' : 'AI Pending';
     const brokerStatus = shipment.brokerApprovalStatus === 'approved' ? 'Broker Approved' : 
@@ -74,6 +82,14 @@ export function ShipmentTracking() {
     } else if (statusFilter === 'pending') {
       filteredShipments = filteredShipments.filter(s => 
         s.aiApprovalStatus === 'pending' || s.brokerApprovalStatus === 'pending'
+      );
+    } else if (statusFilter === 'documents-requested') {
+      filteredShipments = filteredShipments.filter(s => 
+        s.status === 'documents-requested' || s.brokerApprovalStatus === 'documents-requested'
+      );
+    } else if (statusFilter === 'documents-uploaded') {
+      filteredShipments = filteredShipments.filter(s => 
+        s.status === 'documents-uploaded'
       );
     } else if (statusFilter === 'paid') {
       filteredShipments = filteredShipments.filter(s => s.status === 'paid');
@@ -135,6 +151,8 @@ export function ShipmentTracking() {
               <option value="ai-approved">AI Approved</option>
               <option value="broker-approved">Broker Approved</option>
               <option value="pending">Pending</option>
+              <option value="documents-requested">Documents Requested</option>
+              <option value="documents-uploaded">Documents Uploaded</option>
               <option value="paid">Paid</option>
             </select>
           </div>
@@ -146,7 +164,7 @@ export function ShipmentTracking() {
               className="w-full px-4 py-2 rounded-lg border focus:outline-none focus:ring-2"
               style={{ borderColor: '#EADFD8', background: '#FFFFFF', color: '#2F1B17' }}
             >
-              <option value="all">All Brokers</option>
+              <option value="all">All </option>
               <option value="assigned">Assigned</option>
               <option value="unassigned">Unassigned</option>
             </select>
