@@ -89,3 +89,13 @@ export async function getDocumentRequests(shipmentId) {
   const resp = await http.get(`/Documents/shipments/${shipmentId}/document-requests`);
   return resp.data;
 }
+
+/**
+ * Get document upload status for a shipment
+ * Returns dictionary mapping documentType -> true (uploaded) or false (not uploaded)
+ * @param {number} shipmentId - The shipment ID
+ */
+export async function getDocumentStatus(shipmentId) {
+  const resp = await http.get(`/Shipments/${shipmentId}/documents/status`);
+  return resp.data;
+}
