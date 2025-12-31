@@ -54,6 +54,10 @@ namespace PreClear.Api.Services
             if (shipment == null)
                 throw new ArgumentException("shipment_not_found", nameof(shipmentId));
 
+            // CRITICAL: Check if there's an existing active document of the same type
+            // If found, mark it as replaced (soft-delete) before uploading the new one
+            var existingDoc = await _repo.FindActiveDocumentByTypeAsync(shipmentId, docType);
+
             var docFolder = SlugifyDocType(docType);
             var folder = $"shippers/{shipment.CreatedBy}/shipments/{shipmentId}/{docFolder}";
 
@@ -92,11 +96,23 @@ namespace PreClear.Api.Services
                 MimeType = file.ContentType,
                 UploadedBy = uploadedBy,
                 UploadedAt = DateTime.UtcNow,
+                IsActive = true, // New document is active
                 DownloadUrl = BuildDownloadUrlPlaceholder(0) // temporary placeholder, updated below
             };
 
             var created = await _repo.AddAsync(doc);
             created.DownloadUrl = BuildDownloadUrlPlaceholder(created.Id);
+
+            // REPLACEMENT LOGIC: Mark the old document as replaced
+            if (existingDoc != null)
+            {
+                existingDoc.IsActive = false;
+                existingDoc.ReplacedByDocumentId = created.Id;
+                existingDoc.ReplacedAt = DateTime.UtcNow;
+                await _repo.UpdateAsync(existingDoc);
+                _logger.LogInformation("Replaced document {OldDocId} with {NewDocId} for shipment {ShipmentId}, docType {DocType}",
+                    existingDoc.Id, created.Id, shipmentId, docType);
+            }
 
             // Check if this upload fulfills a document request
             var pendingRequests = await _repo.GetDocumentRequestsByShipmentAsync(shipmentId);
