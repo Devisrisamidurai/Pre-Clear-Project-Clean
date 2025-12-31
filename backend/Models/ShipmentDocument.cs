@@ -54,6 +54,16 @@ namespace PreClear.Api.Models
         [Column("uploaded_at")]
         public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
 
+        // Document replacement tracking
+        [Column("is_active")]
+        public bool IsActive { get; set; } = true;
+
+        [Column("replaced_by_document_id")]
+        public long? ReplacedByDocumentId { get; set; }
+
+        [Column("replaced_at")]
+        public DateTime? ReplacedAt { get; set; }
+
         // Navigation
         [ForeignKey("ShipmentId")]
         [JsonIgnore]
