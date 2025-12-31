@@ -24,10 +24,27 @@ namespace PreClear.Api.Repositories
         /// Gets all documents for a shipment. Only returns non-deleted documents since 
         /// deleted documents are physically removed from the database.
         /// This ensures AI validation only processes currently existing documents.
+        /// NOW: Also filters by IsActive to return only active (non-replaced) documents.
         /// </summary>
         public async Task<List<ShipmentDocument>> GetByShipmentIdAsync(long shipmentId)
         {
-            return await _db.ShipmentDocuments.AsNoTracking().Where(d => d.ShipmentId == shipmentId).OrderByDescending(d => d.UploadedAt).ToListAsync();
+            return await _db.ShipmentDocuments
+                .AsNoTracking()
+                .Where(d => d.ShipmentId == shipmentId && d.IsActive)
+                .OrderByDescending(d => d.UploadedAt)
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// Finds an existing active document for a given shipment and document type.
+        /// Used for document replacement logic.
+        /// </summary>
+        public async Task<ShipmentDocument?> FindActiveDocumentByTypeAsync(long shipmentId, string documentType)
+        {
+            return await _db.ShipmentDocuments
+                .FirstOrDefaultAsync(d => d.ShipmentId == shipmentId 
+                    && d.DocumentType == documentType 
+                    && d.IsActive);
         }
 
         public async Task<ShipmentDocument?> FindAsync(long id)
