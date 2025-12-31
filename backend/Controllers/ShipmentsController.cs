@@ -5,7 +5,9 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using PreClear.Api.Data;
 using PreClear.Api.Interfaces;
 using PreClear.Api.Models;
 using PreClear.Api.Services;
@@ -20,20 +22,123 @@ namespace PreClear.Api.Controllers
         private readonly BrokerAssignmentService _brokerAssignment;
         private readonly ILogger<ShipmentsController> _logger;
         private readonly INotificationService _notificationService;
+        private readonly IDocumentService _documentService;
+        private readonly PreclearDbContext _db;
 
-        public ShipmentsController(IShipmentService service, BrokerAssignmentService brokerAssignment, ILogger<ShipmentsController> logger, INotificationService notificationService)
+        public ShipmentsController(IShipmentService service, BrokerAssignmentService brokerAssignment, ILogger<ShipmentsController> logger, INotificationService notificationService, IDocumentService documentService, PreclearDbContext db)
         {
             _service = service;
             _brokerAssignment = brokerAssignment;
             _logger = logger;
             _notificationService = notificationService;
+            _documentService = documentService;
+            _db = db;
         }
 
-        private static PreClear.Api.Models.NormalizedShipmentDto MapNormalized(PreClear.Api.Models.ShipmentDetailDto detail)
+        private PreClear.Api.Models.NormalizedShipmentDto MapNormalized(PreClear.Api.Models.ShipmentDetailDto detail)
         {
             var s = detail.Shipment;
             var shipper = detail.Parties.FirstOrDefault(p => p.PartyType == "shipper");
             var consignee = detail.Parties.FirstOrDefault(p => p.PartyType == "consignee");
+
+            // CRITICAL: Fallback to creator's user profile if shipper party data is missing or incomplete
+            // Always enrich with user data for ContactName, Email, Phone if they're empty
+            var creator = _db.Users
+                .Include(u => u.ShipperProfile)
+                .FirstOrDefault(u => u.Id == s.CreatedBy);
+            
+            if (creator != null)
+            {
+                _logger.LogInformation("Shipment {ShipmentId}: Loaded creator user {UserId} - {FirstName} {LastName}, Company: {Company}, Email: {Email}, Phone: {Phone}", 
+                    s.Id, creator.Id, creator.FirstName, creator.LastName, creator.Company, creator.Email, creator.Phone);
+                
+                if (shipper == null)
+                {
+                    // Create shipper from user profile
+                    shipper = new PreClear.Api.Models.ShipmentParty
+                    {
+                        PartyType = "shipper",
+                        CompanyName = creator.Company ?? "",
+                        ContactName = $"{creator.FirstName} {creator.LastName}".Trim(),
+                        Email = creator.Email ?? "",
+                        Phone = creator.Phone ?? "",
+                        Address1 = creator.ShipperProfile?.AddressLine1 ?? "",
+                        Address2 = creator.ShipperProfile?.AddressLine2 ?? "",
+                        City = creator.ShipperProfile?.City ?? "",
+                        State = creator.ShipperProfile?.State ?? "",
+                        PostalCode = creator.ShipperProfile?.PostalCode ?? "",
+                        Country = creator.ShipperProfile?.CountryCode ?? ""
+                    };
+                    _logger.LogInformation("Shipment {ShipmentId}: Created shipper from user profile - Company: {Company}, Contact: {Contact}, Email: {Email}",
+                        s.Id, shipper.CompanyName, shipper.ContactName, shipper.Email);
+                }
+                else
+                {
+                    // ALWAYS fill in ContactName, Email, Phone from user profile if missing
+                    var needsEnrichment = false;
+                    
+                    if (string.IsNullOrWhiteSpace(shipper.CompanyName)) 
+                    { 
+                        shipper.CompanyName = creator.Company ?? "";
+                        needsEnrichment = true;
+                    }
+                    
+                    if (string.IsNullOrWhiteSpace(shipper.ContactName)) 
+                    { 
+                        shipper.ContactName = $"{creator.FirstName} {creator.LastName}".Trim();
+                        needsEnrichment = true;
+                        _logger.LogInformation("Shipment {ShipmentId}: Enriched ContactName from user: {ContactName}", s.Id, shipper.ContactName);
+                    }
+                    
+                    if (string.IsNullOrWhiteSpace(shipper.Email)) 
+                    { 
+                        shipper.Email = creator.Email ?? "";
+                        needsEnrichment = true;
+                        _logger.LogInformation("Shipment {ShipmentId}: Enriched Email from user: {Email}", s.Id, shipper.Email);
+                    }
+                    
+                    if (string.IsNullOrWhiteSpace(shipper.Phone)) 
+                    { 
+                        shipper.Phone = creator.Phone ?? "";
+                        needsEnrichment = true;
+                        _logger.LogInformation("Shipment {ShipmentId}: Enriched Phone from user: {Phone}", s.Id, shipper.Phone);
+                    }
+                    
+                    if (string.IsNullOrWhiteSpace(shipper.Address1)) 
+                    { 
+                        shipper.Address1 = creator.ShipperProfile?.AddressLine1 ?? "";
+                        needsEnrichment = true;
+                    }
+                    
+                    if (string.IsNullOrWhiteSpace(shipper.City)) 
+                    { 
+                        shipper.City = creator.ShipperProfile?.City ?? "";
+                        needsEnrichment = true;
+                    }
+                    
+                    if (string.IsNullOrWhiteSpace(shipper.Country)) 
+                    { 
+                        shipper.Country = creator.ShipperProfile?.CountryCode ?? "";
+                        needsEnrichment = true;
+                    }
+                    
+                    if (needsEnrichment)
+                    {
+                        _logger.LogInformation("Shipment {ShipmentId}: Enriched shipper with user profile data - Contact: {Contact}, Email: {Email}, Phone: {Phone}",
+                            s.Id, shipper.ContactName, shipper.Email, shipper.Phone);
+                    }
+                }
+            }
+            else
+            {
+                _logger.LogError("Shipment {ShipmentId}: Could not load creator user {CreatedBy}", s.Id, s.CreatedBy);
+            }
+
+            if (shipper != null)
+            {
+                _logger.LogInformation("Shipment {ShipmentId}: Final shipper data - Company: {Company}, Contact: {Contact}, Email: {Email}, Phone: {Phone}",
+                    s.Id, shipper.CompanyName, shipper.ContactName, shipper.Email, shipper.Phone);
+            }
 
             var normalized = new PreClear.Api.Models.NormalizedShipmentDto
             {
@@ -176,10 +281,9 @@ namespace PreClear.Api.Controllers
             {
                 var created = await _service.CreateAsync(dto);
                 
-                // Automatically assign broker based on shipment details
-                await _brokerAssignment.AssignBrokerAsync(created.Id);
+                // Broker assignment removed - now triggered manually via "Request Broker Review" button after AI approval
 
-                // Reload shipment with updated assignment
+                // Reload shipment details
                 var updated = await _service.GetDetailAsync(created.Id);
                 if (updated == null) return StatusCode(500, new { error = "internal_error" });
                 var normalized = MapNormalized(updated);
@@ -861,6 +965,48 @@ namespace PreClear.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error deleting shipment {Id}", id);
+                return StatusCode(500, new { error = "internal_error" });
+            }
+        }
+
+        /// <summary>
+        /// GET /api/shipments/{id}/documents/status
+        /// Get document upload status for a shipment
+        /// Returns dictionary mapping documentType -> true (uploaded) or false (not uploaded)
+        /// </summary>
+        [HttpGet("{id}/documents/status")]
+        [Authorize]
+        public async Task<IActionResult> GetDocumentStatus(long id)
+        {
+            try
+            {
+                var shipment = await _service.GetDetailAsync(id);
+                if (shipment == null)
+                {
+                    return NotFound(new { error = "shipment_not_found" });
+                }
+
+                // Verify authorization - user must be shipment creator or assigned broker
+                var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (!long.TryParse(userId, out var userIdLong))
+                {
+                    return Unauthorized();
+                }
+
+                var isCreator = shipment.Shipment.CreatedBy == userIdLong;
+                var isAssignedBroker = shipment.Shipment.AssignedBrokerId == userIdLong;
+
+                if (!isCreator && !isAssignedBroker)
+                {
+                    return Forbid();
+                }
+
+                var documentStatus = await _documentService.GetDocumentStatusByShipmentAsync(id);
+                return Ok(documentStatus);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting document status for shipment {Id}", id);
                 return StatusCode(500, new { error = "internal_error" });
             }
         }

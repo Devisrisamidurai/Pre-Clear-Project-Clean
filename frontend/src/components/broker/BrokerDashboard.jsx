@@ -40,6 +40,14 @@ export function BrokerDashboard({ onNavigate }) {
       activeShipments = activeShipments.filter(s => 
         s.status === 'documents-uploaded' || s.status === 'awaiting-ai'
       );
+    } else if (statusFilter === 'documents-requested') {
+      activeShipments = activeShipments.filter(s => 
+        s.status === 'documents-requested' || s.brokerApproval === 'documents-requested'
+      );
+    } else if (statusFilter === 'documents-uploaded') {
+      activeShipments = activeShipments.filter(s => 
+        s.status === 'documents-uploaded'
+      );
     } else if (statusFilter === 'docs-requested') {
       activeShipments = activeShipments.filter(s => 
         s.status === 'document-requested' || s.brokerApproval === 'documents-requested'
@@ -97,8 +105,11 @@ export function BrokerDashboard({ onNavigate }) {
   };
 
   const getStatusBadge = (shipment) => {
-    if (shipment.status === 'document-requested') {
-      return <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm">Awaiting Documents</span>;
+    if (shipment.status === 'documents-requested' || shipment.brokerApproval === 'documents-requested') {
+      return <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm">Documents Requested</span>;
+    }
+    if (shipment.status === 'documents-uploaded') {
+      return <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Documents Uploaded</span>;
     }
     if (shipment.status === 'awaiting-broker' && shipment.brokerApproval === 'documents-requested') {
       return <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Documents Resubmitted</span>;
@@ -106,7 +117,7 @@ export function BrokerDashboard({ onNavigate }) {
     if (shipment.aiApproval === 'approved' && shipment.brokerApproval === 'pending') {
       return <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">Pending Review</span>;
     }
-    if (shipment.status === 'documents-uploaded' || shipment.status === 'awaiting-ai') {
+    if (shipment.status === 'awaiting-ai') {
       return <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">New - Awaiting AI</span>;
     }
     return <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-sm">{shipment.status}</span>;
@@ -306,6 +317,8 @@ export function BrokerDashboard({ onNavigate }) {
                 <option value="all">All Shipments</option>
                 <option value="pending-review">Pending Review</option>
                 <option value="new-submissions">New Submissions</option>
+                <option value="documents-requested">Documents Requested</option>
+                <option value="documents-uploaded">Documents Uploaded</option>
               </select>
             </div>
           </div>

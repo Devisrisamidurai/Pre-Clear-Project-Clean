@@ -10,6 +10,7 @@ import { createShipment, updateShipment } from '../../api/shipments';
 import { markShipmentDocument } from '../../api/documents';
 import { getProfile } from '../../api/auth';
 import { uploadShipmentDocument } from '../../api/documents';
+import { getDocumentStatus } from '../../api/documents';
 import AutoFillToggle from '../AutoFillToggle';
 import DocumentUploadSection from '../DocumentUploadSection';
 import { useShipmentDraftStore } from '../../store/shipmentDraftStore';
@@ -296,23 +297,32 @@ const CheckboxField = ({ label, name, checked, onChange }) => (
 );
 
 export function ShipmentForm({ shipment, onNavigate }) {
+  const normalizeShipment = (raw) => {
+    if (!raw) return null;
+    const normalizedId = raw.id ?? raw.Id ?? raw.shipmentId ?? raw.ShipmentId ?? raw.shipment_id;
+    return {
+      ...raw,
+      id: normalizedId,
+      referenceId: raw.referenceId ?? raw.ReferenceId ?? raw.reference_id,
+      shipper: raw.shipper || {},
+      consignee: raw.consignee || {},
+      packages: raw.packages || [],
+      products: raw.products || [],
+      documents: raw.documents || [],
+      documentRequests: raw.documentRequests || [],
+    };
+  };
+
   // Initialize form data - START COMPLETELY EMPTY for new shipments
   // Only populate from shipment prop if editing existing shipment
   const [formData, setFormData] = useState(() => {
-    if (shipment) {
-      // If editing existing shipment, spread it
-      return {
-        packages: shipment.packages || [],
-        products: shipment.products || [],
-        documents: shipment.documents || [],
-        documentRequests: shipment.documentRequests || [],
-        ...shipment
-      };
-    }
+    const normalized = normalizeShipment(shipment);
+    if (normalized) return normalized;
     // NEW SHIPMENT: Start completely empty - no default shipper/consignee/packages
     return {
-      shipper: null,
-      consignee: null,
+      // Initialize party objects so nested edits always have a target
+      shipper: {},
+      consignee: {},
       packages: [],
       products: [],
       documents: [],
@@ -329,7 +339,8 @@ export function ShipmentForm({ shipment, onNavigate }) {
   const [profileCountry, setProfileCountry] = useState('');
   const [profileCurrency, setProfileCurrency] = useState('USD');
   const [profileData, setProfileData] = useState(null);
-  const [shipperEditable, setShipperEditable] = useState(false);
+  // Allow shipper fields to be edited by default on new shipments; lock only when editing an existing shipment
+  const [shipperEditable, setShipperEditable] = useState(!shipment);
   const [expandedSections, setExpandedSections] = useState({
     basics: true,
     shipper: false,
@@ -404,24 +415,57 @@ export function ShipmentForm({ shipment, onNavigate }) {
 
 
   // Apply profile data into the form (used on load and when profile changes)
-  // IMPORTANT: Only stores profile metadata (country, currency) - does NOT auto-populate shipper/consignee/packages
-  // Sidebar must show empty state until user enters data or extraction populates it
+  // Populates shipper info from profile to ensure it's saved when creating shipment
   const applyProfileToForm = (profile) => {
-    // Extract shipper profile data from API response
-    const shipperProfile = profile?.profile || {};
-    const countryCode = resolveCountryCode(shipperProfile.countryCode || '');
+    console.log('[ShipmentForm] Applying profile to form:', profile);
+    
+    // Extract shipper profile data from API response (handle both PascalCase and camelCase)
+    const shipperProfile = profile?.Profile || profile?.profile || {};
+    const countryCode = resolveCountryCode(shipperProfile.CountryCode || shipperProfile.countryCode || '');
     const currency = countryCode ? getCurrencyByCountry(countryCode).code : 'USD';
     setProfileCountry(countryCode);
     setProfileCurrency(currency);
     setProfileData(profile);
 
-    // ONLY set currency from profile - do NOT auto-populate shipper/consignee/packages
-    // This ensures clean empty sidebar on new shipments
+    // Extract profile fields (handle both PascalCase and camelCase from backend)
+    const firstName = profile?.FirstName || profile?.firstName || '';
+    const lastName = profile?.LastName || profile?.lastName || '';
+    const company = profile?.Company || profile?.company || '';
+    const email = profile?.Email || profile?.email || '';
+    const phone = profile?.Phone || profile?.phone || '';
+    const addressLine1 = shipperProfile.AddressLine1 || shipperProfile.addressLine1 || '';
+    const addressLine2 = shipperProfile.AddressLine2 || shipperProfile.addressLine2 || '';
+    const city = shipperProfile.City || shipperProfile.city || '';
+    const state = shipperProfile.State || shipperProfile.state || '';
+    const postalCode = shipperProfile.PostalCode || shipperProfile.postalCode || shipperProfile.PinCode || shipperProfile.pinCode || '';
+
+    const contactName = firstName && lastName ? `${firstName} ${lastName}`.trim() : '';
+
+    console.log('[ShipmentForm] Extracted profile data:', {
+      company, contactName, email, phone, addressLine1, city, state, postalCode, countryCode
+    });
+
+    // Populate shipper info from profile so it's saved in the shipment
     setFormData(prev => {
-      return {
+      const updatedData = {
         ...prev,
         currency: prev.currency || currency,
+        shipper: {
+          ...(prev.shipper || {}),
+          company: prev.shipper?.company || company,
+          contactName: prev.shipper?.contactName || contactName,
+          email: prev.shipper?.email || email,
+          phone: prev.shipper?.phone || phone,
+          address1: prev.shipper?.address1 || addressLine1,
+          address2: prev.shipper?.address2 || addressLine2,
+          city: prev.shipper?.city || city,
+          state: prev.shipper?.state || state,
+          postalCode: prev.shipper?.postalCode || postalCode,
+          country: prev.shipper?.country || countryCode,
+        }
       };
+      console.log('[ShipmentForm] Updated formData.shipper:', updatedData.shipper);
+      return updatedData;
     });
   };
 
@@ -441,12 +485,16 @@ export function ShipmentForm({ shipment, onNavigate }) {
     
     const loadProfileFromDB = async () => {
       try {
+        console.log('[ShipmentForm] Loading profile from database...');
         const profile = await getProfile();
+        console.log('[ShipmentForm] Profile loaded from database:', profile);
         if (profile) {
           applyProfileToForm(profile);
+        } else {
+          console.warn('[ShipmentForm] No profile data returned from API');
         }
       } catch (err) {
-        console.error('Failed to load profile from database:', err);
+        console.error('[ShipmentForm] Failed to load profile from database:', err);
         // Fallback to localStorage if API fails
         try {
           const localProfile = getStoredProfile();
@@ -587,26 +635,25 @@ export function ShipmentForm({ shipment, onNavigate }) {
           uploaded: false
         }));
 
-        // If we have a shipmentId, fetch existing documents to map upload status
-        if (formData.id) {
+        // If we have a shipmentId, fetch document status from backend
+        if (formData.id && /^\d+$/.test(formData.id)) {
           try {
-            const docsResponse = await fetch(`/api/documents/shipments/${formData.id}/documents`);
-            if (docsResponse.ok) {
-              const existingDocs = await docsResponse.json();
-              aiDocs.forEach(doc => {
-                const match = existingDocs.find(d => {
-                  const typeMatch = d.documentType && doc.name && d.documentType.toLowerCase() === doc.name.toLowerCase();
-                  const nameMatch = d.fileName && doc.name && d.fileName.toLowerCase().includes(doc.name.toLowerCase());
-                  return typeMatch || nameMatch;
-                });
-                if (match) {
-                  doc.uploaded = true;
-                  doc.fileName = match.fileName || doc.fileName;
-                }
-              });
-            }
+            const documentStatus = await getDocumentStatus(formData.id);
+            console.log('[ShipmentForm] Document status fetched:', documentStatus);
+            
+            // Update aiDocs with actual document upload status from backend
+            aiDocs.forEach(doc => {
+              // Try to match document type
+              const docTypeKey = doc.name.toLowerCase().replace(/\s+/g, '_');
+              const isUploaded = documentStatus[docTypeKey] || documentStatus[doc.name] || false;
+              if (isUploaded) {
+                doc.uploaded = true;
+                console.log(`[ShipmentForm] Document "${doc.name}" marked as uploaded from database`);
+              }
+            });
           } catch (err) {
-            console.error('Failed to fetch existing documents:', err);
+            console.error('[ShipmentForm] Failed to fetch document status:', err);
+            // Fall back gracefully - don't prevent form from loading
           }
         }
 
@@ -643,7 +690,7 @@ export function ShipmentForm({ shipment, onNavigate }) {
     setFormData(prev => {
       const updated = {
         ...prev,
-        [parent]: { ...prev[parent], [field]: value }
+        [parent]: { ...(prev[parent] || {}), [field]: value }
       };
       // Sync to global store if in auto mode
       if (mode === 'auto') {
@@ -1015,26 +1062,27 @@ export function ShipmentForm({ shipment, onNavigate }) {
     }
 
     // RE-CHECK upload status from backend if shipment has numeric ID (exists in DB)
-    // Skip verification for string IDs (frontend-only shipments not yet saved to DB)
+    // Use the new document status endpoint for state-aware validation
     if (formData.id && /^\d+$/.test(formData.id)) {
       try {
-        const response = await fetch(`/api/documents/shipments/${formData.id}/documents`);
-        if (response.ok) {
-          const backendDocs = await response.json();
-          const mismatch = requiredDocs.find(doc => {
-            const backendDoc = backendDocs.find(bd => bd.name === doc.name);
-            return !backendDoc || !backendDoc.uploaded;
-          });
-          
-          if (mismatch) {
-            setDocumentValidationError(`Upload status mismatch detected. Please refresh and verify all documents are uploaded.`);
-            return;
-          }
+        const documentStatus = await getDocumentStatus(formData.id);
+        console.log('[ShipmentForm] Re-checking document status from backend:', documentStatus);
+        
+        // Verify all required documents have backend confirmation
+        const missingDocs = requiredDocs.filter(doc => {
+          const docTypeKey = doc.name.toLowerCase().replace(/\s+/g, '_');
+          const isBackendUploaded = documentStatus[docTypeKey] || documentStatus[doc.name] || false;
+          return !isBackendUploaded;
+        });
+        
+        if (missingDocs.length > 0) {
+          setDocumentValidationError(`The following documents are not confirmed uploaded in the system: ${missingDocs.map(d => d.name).join(', ')}. Please refresh the page and try again.`);
+          return;
         }
       } catch (err) {
-        console.error('Failed to verify document status:', err);
-        setDocumentValidationError('Failed to verify document upload status. Please try again.');
-        return;
+        console.error('[ShipmentForm] Failed to verify document status:', err);
+        // Don't fail - proceed with submit if backend status check fails
+        console.log('[ShipmentForm] Proceeding despite document status verification failure');
       }
     }
 
@@ -1157,6 +1205,8 @@ export function ShipmentForm({ shipment, onNavigate }) {
       const isUpdate = formData.id && /^\d+$/.test(formData.id);
 
       console.log('[ShipmentForm] Sending shipment payload to backend:', JSON.stringify(shipmentPayload, null, 2));
+      console.log('[ShipmentForm] Shipper data being sent:', shipmentPayload.Shipper);
+      console.log('[ShipmentForm] formData.shipper before submit:', formData.shipper);
       
       // Use centralized axios-based shipments API; JWT is attached automatically.
       const apiResponse = isUpdate

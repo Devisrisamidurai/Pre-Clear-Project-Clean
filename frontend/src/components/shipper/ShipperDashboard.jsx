@@ -28,6 +28,15 @@ export function ShipperDashboard({ onNavigate }) {
     s.status === 'document-requested'
   );
   
+  const documentsRequested = activeShipments.filter(s => 
+    s.status === 'documents-requested' || 
+    s.brokerApproval === 'documents-requested'
+  );
+  
+  const documentsUploaded = activeShipments.filter(s => 
+    s.status === 'documents-uploaded'
+  );
+  
   const inReview = activeShipments.filter(s => 
     s.status === 'awaiting-ai' || 
     s.status === 'awaiting-broker' ||
@@ -45,6 +54,8 @@ export function ShipperDashboard({ onNavigate }) {
   const getFilteredShipments = () => {
     if (filterStatus === 'all') return activeShipments;
     if (filterStatus === 'pending') return pendingReview;
+    if (filterStatus === 'documents-requested') return documentsRequested;
+    if (filterStatus === 'documents-uploaded') return documentsUploaded;
     if (filterStatus === 'review') return inReview;
     if (filterStatus === 'cleared') return cleared;
     if (filterStatus === 'cancelled') return cancelled;
@@ -75,11 +86,19 @@ export function ShipperDashboard({ onNavigate }) {
         </span>
       );
     }
-    if (shipment.status === 'document-requested') {
+    if (shipment.status === 'documents-requested' || shipment.brokerApproval === 'documents-requested') {
       return (
         <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm flex items-center gap-1">
           <AlertTriangle className="w-3 h-3" />
           Documents Requested
+        </span>
+      );
+    }
+    if (shipment.status === 'documents-uploaded') {
+      return (
+        <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm flex items-center gap-1">
+          <Upload className="w-3 h-3" />
+          Documents Uploaded
         </span>
       );
     }
@@ -140,7 +159,7 @@ export function ShipperDashboard({ onNavigate }) {
     const hasToken = shipment.token && shipment.token !== '';
 
     // Draft / Documents requested: show View + Upload/Uploaded
-    if (shipment.status === 'draft' || shipment.status === 'document-requested') {
+    if (shipment.status === 'draft' || shipment.status === 'documents-requested' || shipment.brokerApproval === 'documents-requested') {
       return (
         <div className="flex gap-2">
           <button
@@ -157,28 +176,6 @@ export function ShipperDashboard({ onNavigate }) {
             <Eye className="w-3.5 h-3.5" />
             View
           </button>
-
-          {shipment.status === 'document-requested' && (shipment.brokerApproval === 'documents-requested' || !hasUploadedDocuments) && (
-            <button
-              onClick={() => onNavigate('chat', shipment, { showRequiredDocuments: true })}
-              className="px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm flex items-center gap-1"
-              title="Open chat to upload required documents"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              Upload
-            </button>
-          )}
-
-          {shipment.status === 'document-requested' && hasUploadedDocuments && shipment.brokerApproval !== 'documents-requested' && (
-            <button
-              disabled
-              className="px-3 py-1.5 bg-slate-200 text-slate-500 rounded-lg transition-colors text-sm flex items-center gap-1 cursor-not-allowed"
-              title="Documents uploaded"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              Uploaded
-            </button>
-          )}
         </div>
       );
     }
@@ -399,6 +396,8 @@ export function ShipperDashboard({ onNavigate }) {
           {[
             { label: 'All Shipments', value: 'all' },
             { label: 'Pending Review', value: 'pending' },
+            { label: 'Docs Requested', value: 'documents-requested' },
+            { label: 'Docs Uploaded', value: 'documents-uploaded' },
             { label: 'In Review', value: 'review' },
             { label: 'Cleared', value: 'cleared' },
             { label: 'Cancelled', value: 'cancelled' }
@@ -423,6 +422,8 @@ export function ShipperDashboard({ onNavigate }) {
         <h2 className="text-yellow-900 text-lg font-bold mb-4">
           {filterStatus === 'all' ? 'All Shipments' : 
            filterStatus === 'pending' ? 'Pending Review' : 
+           filterStatus === 'documents-requested' ? 'Documents Requested' : 
+           filterStatus === 'documents-uploaded' ? 'Documents Uploaded' : 
            filterStatus === 'review' ? 'In Review' : 
            filterStatus === 'cleared' ? 'Cleared' : 
            'Cancelled'} ({filteredShipments.length})
