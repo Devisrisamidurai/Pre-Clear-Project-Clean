@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text;
@@ -8,6 +9,8 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using PreClear.Api.Interfaces;
+using PreClear.Api.Models;
+using PreClear.Api.Services;
 
 namespace PreClear.Api.AI.Services.DocumentValidator
 {
@@ -16,12 +19,18 @@ namespace PreClear.Api.AI.Services.DocumentValidator
         private readonly IConfiguration _config;
         private readonly IHttpClientFactory _httpFactory;
         private readonly ILogger<AiDocumentAnalyzer> _logger;
+        private readonly IComplianceValidationService _complianceService;
 
-        public AiDocumentAnalyzer(IConfiguration config, IHttpClientFactory httpFactory, ILogger<AiDocumentAnalyzer> logger)
+        public AiDocumentAnalyzer(
+            IConfiguration config, 
+            IHttpClientFactory httpFactory, 
+            ILogger<AiDocumentAnalyzer> logger,
+            IComplianceValidationService complianceService)
         {
             _config = config;
             _httpFactory = httpFactory;
             _logger = logger;
+            _complianceService = complianceService;
         }
 
         public async Task<Dictionary<string, string>> ExtractFieldsAsync(string content, string documentType)
@@ -138,6 +147,56 @@ namespace PreClear.Api.AI.Services.DocumentValidator
             }
 
             return result;
+        }
+
+        public async Task<ComplianceValidationResult> ValidateAndComplianceCheckAsync(
+            string content,
+            string documentType,
+            Dictionary<string, string> shipmentFormData)
+        {
+            try
+            {
+                // Step 1: Extract fields from document
+                _logger.LogInformation("Starting comprehensive validation for {DocType}", documentType);
+                var extractedFields = await ExtractFieldsAsync(content, documentType);
+
+                // Step 2: Perform compliance validation
+                var validationResult = await _complianceService.ValidateShipmentAsync(
+                    extractedFields,
+                    shipmentFormData ?? new Dictionary<string, string>(),
+                    documentType);
+
+                _logger.LogInformation(
+                    "Validation complete: Status={Status}, Score={Score}, Errors={ErrorCount}, Critical={CriticalErrors}",
+                    validationResult.ValidationStatus,
+                    validationResult.ComplianceScore,
+                    validationResult.Errors.Count,
+                    validationResult.Errors.Count(e => e.Severity == "critical"));
+
+                return validationResult;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during compliance validation and checking");
+
+                return new ComplianceValidationResult
+                {
+                    DocumentType = documentType,
+                    ValidationStatus = "rejected",
+                    ComplianceScore = 0,
+                    RiskLevel = "critical",
+                    Errors = new List<ValidationError>
+                    {
+                        new ValidationError
+                        {
+                            Code = "VALIDATION_EXCEPTION",
+                            Message = "An unexpected error occurred during validation",
+                            Severity = "critical",
+                            Recommendation = "Please contact support and retry"
+                        }
+                    }
+                };
+            }
         }
     }
 }
