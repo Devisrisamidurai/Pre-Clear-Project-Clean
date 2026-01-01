@@ -305,7 +305,7 @@ namespace PreClear.Api.Services
 
         private Task<AiResultDto> _aiPredictRequiredDocuments(string origin, string destination, string hsCode, bool? htsFlag, string category, string description, string packageTypeWeight, string mode)
         {
-            return _aiService.PredictRequiredDocumentsAsync(origin, destination, hsCode, htsFlag, category, description, packageTypeWeight, mode, pythonPort: 9000);
+            return _aiService.PredictRequiredDocumentsAsync(origin, destination, hsCode, htsFlag, category, description, packageTypeWeight, mode, pythonPort: 8002);
         }
 
         private Task<List<AiService.HsSuggestion>> _aiSuggestHs(string name, string category, string description, int k)

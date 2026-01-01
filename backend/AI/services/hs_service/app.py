@@ -2,13 +2,27 @@ import os
 from typing import List
 from pydantic import BaseModel
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 BASE_DIR = os.path.dirname(__file__)
 # Navigate up 3 levels: hs_service -> services -> AI -> models
 MODELS_DIR = os.path.join(BASE_DIR, '..', '..', 'models')
 MODELS_DIR = os.path.normpath(MODELS_DIR)
 
-app = FastAPI(title='HS Code Suggestion Service')
+app = FastAPI(
+    title='HS Code Suggestion Service',
+    version='1.0.0',
+    description='AI-powered HS Code suggestion service for customs compliance'
+)
+
+# CORS Configuration for AWS Deployment
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify your frontend domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class SuggestRequest(BaseModel):
     name: str = ''

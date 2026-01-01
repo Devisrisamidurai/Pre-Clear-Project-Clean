@@ -1,7 +1,16 @@
 import axios from 'axios';
 
-// Base URL from env or default
-const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:5000') + '/api';
+// Base URL from environment variables or default to localhost
+// In production, VITE_API_URL should be set to: http://34.201.14.102
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE = `${API_BASE_URL}/api`;
+
+// Log API configuration (helps debug deployment issues)
+console.log('🔧 API Configuration:', {
+  mode: import.meta.env.MODE,
+  apiBase: API_BASE,
+  viteApiUrl: import.meta.env.VITE_API_URL
+});
 
 // Always read the latest token from localStorage (no in-memory cache)
 export function getAuthToken() {

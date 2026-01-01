@@ -117,7 +117,7 @@ namespace PreClear.Api.Services
 
             try
             {
-                var resp = await client.PostAsJsonAsync("http://localhost:9000/predict-documents", payload);
+                var resp = await client.PostAsJsonAsync("http://localhost:8002/predict-documents", payload);
                 if (!resp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Document recommendation service returned {Status}", resp.StatusCode);

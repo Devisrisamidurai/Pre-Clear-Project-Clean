@@ -2,7 +2,14 @@
  * API utility functions for making HTTP requests to the backend
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+// API Base URL - configured for AWS deployment
+// Production: http://34.201.14.102/api
+// Development: http://localhost:5000/api
+const API_BASE_URL_RAW = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE_URL = `${API_BASE_URL_RAW}/api`;
+
+// Log configuration on load
+console.log('🌐 API Base URL:', API_BASE_URL, '| Mode:', import.meta.env.MODE);
 
 /**
  * Get the current user ID from localStorage

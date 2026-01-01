@@ -3,6 +3,10 @@
  * These are sample implementations showing how to connect the form to your backend
  */
 
+// Get API base URL from environment
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE = `${API_BASE_URL}/api`;
+
 // ============================================================================
 // 1. FORM SUBMISSION - Save Shipment to Backend
 // ============================================================================

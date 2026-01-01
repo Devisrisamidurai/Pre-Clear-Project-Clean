@@ -178,13 +178,16 @@ if (!string.IsNullOrWhiteSpace(effectiveConn))
     catch { }
 }
 
-// CORS (dev)
-builder.Services.AddCors(p => p.AddDefaultPolicy(q => 
-    q.WithOrigins("http://localhost:3000") // specify your frontend URL
-     .AllowAnyHeader()
-     .AllowAnyMethod()
-     .AllowCredentials() // required for cookies/auth
-));
+// CORS Configuration for AWS Deployment
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
 
 // HttpClient factory for AI service outgoing calls
 builder.Services.AddHttpClient();
@@ -319,7 +322,7 @@ if (enableHttps)
     app.UseHttpsRedirection();
 }
 
-app.UseCors();
+app.UseCors("AllowAll");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
