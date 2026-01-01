@@ -1,11 +1,15 @@
+using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PreClear.Api.Interfaces;
 using PreClear.Api.Models;
+using PreClear.Api.Services;
 
 namespace PreClear.Api.AI.Services.DocumentValidator
 {
@@ -14,15 +18,18 @@ namespace PreClear.Api.AI.Services.DocumentValidator
         private readonly IAmazonBedrockRuntime _bedrock;
         private readonly ILogger<AiDocumentAnalyzerBedrock> _logger;
         private readonly BedrockSettings _settings;
+        private readonly IComplianceValidationService _complianceService;
 
         public AiDocumentAnalyzerBedrock(
             IAmazonBedrockRuntime bedrock,
             IOptions<BedrockSettings> settings,
-            ILogger<AiDocumentAnalyzerBedrock> logger)
+            ILogger<AiDocumentAnalyzerBedrock> logger,
+            IComplianceValidationService complianceService)
         {
             _bedrock = bedrock;
             _logger = logger;
             _settings = settings.Value ?? new BedrockSettings();
+            _complianceService = complianceService;
         }
 
         public async Task<Dictionary<string, string>> ExtractFieldsAsync(string content, string documentType)
@@ -82,22 +89,39 @@ namespace PreClear.Api.AI.Services.DocumentValidator
   ""invoice_number"": ""string or empty"",
   ""tracking_number"": ""string or empty"",
   ""weight_kg"": ""number or 0"",
+  ""package_count"": ""number or 0"",
+  ""package_type"": ""string or empty (box, pallet, crate, envelope, case, etc)"",
   ""total_value"": ""number or 0"",
   ""hs_code"": ""string or empty"",
-  ""origin_country"": ""string or empty"",
-  ""destination_country"": ""string or empty""
+  ""product_name"": ""string or empty - exact product name from document"",
+  ""product_description"": ""string or empty - detailed description of product"",
+  ""product_category"": ""string or empty - category of product"",
+  ""origin_country"": ""string or empty - full country name"",
+  ""destination_country"": ""string or empty - full country name"",
+  ""shipper_name"": ""string or empty"",
+  ""consignee_name"": ""string or empty"",
+  ""mode_of_transport"": ""string or empty (air, sea, road, rail, courier, multimodal)"",
+  ""shipment_date"": ""string ISO date or empty""
 }";
-            var instructions = $@"You are an expert document parser for {documentType} documents.
-Extract the following fields from the provided text. Return ONLY a valid JSON object matching this schema, with no additional text or explanation.
+            var instructions = $@"You are an expert customs document parser for {documentType} documents.
+Extract ALL the following fields from the provided text. Return ONLY a valid JSON object matching this schema, with no additional text or explanation.
 
 Schema:
 {schema}
 
 Rules:
-- Return empty string "" for missing string values
+- Return empty string """" for missing string values
 - Return 0 for missing numeric values
-- Extract exact values from the document
-- Respond with ONLY the JSON object
+- Extract EXACT values from the document, preserving original spelling and format
+- For countries: use FULL country names (e.g., ""United States"" not ""USA"", ""Germany"" not ""DE"")
+- For product name: extract the exact product name as listed (e.g., ""Lithium-Ion Battery Cells"", ""Fresh Apples"", ""Prescription Medications"")
+- For product description: extract detailed text from invoice/packing list, including any regulatory notes or restrictions mentioned
+- For HS Code: extract complete HS code (e.g., ""851712"" not partial)
+- For weight: extract in kilograms, convert if necessary
+- For package type: be specific (box, pallet, crate, envelope, case, bundle, bag, etc.)
+- For mode of transport: specify how goods are transported (air, sea, road, rail, courier, multimodal)
+- IMPORTANT: Look for and include any words like ""BANNED"", ""RESTRICTED"", ""HAZMAT"", ""DANGEROUS"", ""PROHIBITED"" in the product_description
+- Respond with ONLY the JSON object, no markdown, no explanation
 
 Document text:
 {content}
@@ -178,11 +202,68 @@ JSON Response:";
                     AddIfExists("hs_code");
                     AddIfExists("origin_country");
                     AddIfExists("destination_country");
+                    AddIfExists("product_name");
+                    AddIfExists("product_description");
+                    AddIfExists("package_type");
+                    AddIfExists("mode_of_transport");
+                    AddIfExists("shipper_name");
+                    AddIfExists("consignee_name");
                 }
             }
             catch { }
             
             return dict;
         }
+
+        public async Task<ComplianceValidationResult> ValidateAndComplianceCheckAsync(
+            string content,
+            string documentType,
+            Dictionary<string, string> shipmentFormData)
+        {
+            try
+            {
+                // Step 1: Extract fields from document
+                _logger.LogInformation("Starting comprehensive validation for {DocType}", documentType);
+                var extractedFields = await ExtractFieldsAsync(content, documentType);
+
+                // Step 2: Perform compliance validation
+                var validationResult = await _complianceService.ValidateShipmentAsync(
+                    extractedFields,
+                    shipmentFormData ?? new Dictionary<string, string>(),
+                    documentType);
+
+                _logger.LogInformation(
+                    "Validation complete: Status={Status}, Score={Score}, Errors={ErrorCount}, Critical={CriticalErrors}",
+                    validationResult.ValidationStatus,
+                    validationResult.ComplianceScore,
+                    validationResult.Errors.Count,
+                    validationResult.Errors.Count(e => e.Severity == "critical"));
+
+                return validationResult;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during compliance validation and checking");
+
+                return new ComplianceValidationResult
+                {
+                    DocumentType = documentType,
+                    ValidationStatus = "rejected",
+                    ComplianceScore = 0,
+                    RiskLevel = "critical",
+                    Errors = new List<ValidationError>
+                    {
+                        new ValidationError
+                        {
+                            Code = "VALIDATION_EXCEPTION",
+                            Message = "An unexpected error occurred during validation",
+                            Severity = "critical",
+                            Recommendation = "Please contact support and retry"
+                        }
+                    }
+                };
+            }
+        }
     }
 }
+

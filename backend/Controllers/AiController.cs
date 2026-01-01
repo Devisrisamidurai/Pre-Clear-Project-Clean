@@ -43,7 +43,7 @@ namespace PreClear.Api.Controllers
             public string ProductDescription { get; set; } = string.Empty;
             public string PackageTypeWeight { get; set; } = string.Empty;
             public string ModeOfTransport { get; set; } = string.Empty;
-            public int PythonPort { get; set; } = 8002;
+            public int PythonPort { get; set; } = 9000;
             public long ShipmentId { get; set; } = 0;
         }
 
@@ -61,7 +61,7 @@ namespace PreClear.Api.Controllers
                     req?.ProductDescription ?? string.Empty,
                     req?.PackageTypeWeight ?? string.Empty,
                     req?.ModeOfTransport ?? string.Empty,
-                    req?.PythonPort ?? 8002,
+                    req?.PythonPort ?? 9000,
                     timeoutSeconds: 10
                 );
 

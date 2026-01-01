@@ -41,7 +41,7 @@ export function setUnauthorizedHandler(handler) {
 // Axios instance
 export const http = axios.create({
   baseURL: API_BASE,
-  withCredentials: true, // send cookies if backend issues auth cookies
+  withCredentials: false, // JWT auth doesn't need cookies; set to true only if using httpOnly cookies
   headers: {
     'Content-Type': 'application/json'
   }
