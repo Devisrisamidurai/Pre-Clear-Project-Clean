@@ -117,7 +117,7 @@ namespace PreClear.Api.Services
 
             try
             {
-                var resp = await client.PostAsJsonAsync("http://localhost:8002/predict-documents", payload);
+                var resp = await client.PostAsJsonAsync("http://localhost:9000/predict-documents", payload);
                 if (!resp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Document recommendation service returned {Status}", resp.StatusCode);
@@ -174,7 +174,7 @@ namespace PreClear.Api.Services
             string productDescription,
             string packageTypeWeight,
             string modeOfTransport,
-            int pythonPort = 8002,
+            int pythonPort = 9000,
             int timeoutSeconds = 10)
         {
             var client = _httpFactory?.CreateClient() ?? new HttpClient();

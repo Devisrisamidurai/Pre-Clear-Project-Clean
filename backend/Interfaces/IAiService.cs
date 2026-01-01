@@ -14,7 +14,7 @@ namespace PreClear.Api.Interfaces
             string productDescription,
             string packageTypeWeight,
             string modeOfTransport,
-            int pythonPort = 8002,
+            int pythonPort = 9000,
             int timeoutSeconds = 10);
     }
 }

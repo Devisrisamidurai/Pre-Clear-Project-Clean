@@ -170,94 +170,187 @@ namespace PreClear.Api.AI.Services.DocumentValidator
             var shipment = detail.Shipment;
             var originCountry = detail.Parties.FirstOrDefault(p => p.PartyType.Equals("shipper", StringComparison.OrdinalIgnoreCase))?.Country;
             var destinationCountry = detail.Parties.FirstOrDefault(p => p.PartyType.Equals("consignee", StringComparison.OrdinalIgnoreCase))?.Country;
+            var shipperName = detail.Parties.FirstOrDefault(p => p.PartyType.Equals("shipper", StringComparison.OrdinalIgnoreCase))?.CompanyName;
+            var consigneeName = detail.Parties.FirstOrDefault(p => p.PartyType.Equals("consignee", StringComparison.OrdinalIgnoreCase))?.CompanyName;
             var totalWeight = detail.Packages.Any() ? detail.Packages.Sum(p => p.Weight ?? 0m) : (decimal?)null;
             var packageType = detail.Packages.FirstOrDefault()?.PackageType;
+            var packageCount = detail.Packages.Count();
             var hsCode = detail.Items.FirstOrDefault()?.HsCode;
             var productDescription = detail.Items.FirstOrDefault()?.Description ?? detail.Items.FirstOrDefault()?.Name;
+            var productCategory = detail.Items.FirstOrDefault()?.Category;
+            var modeOfTransport = shipment.Mode;
             var customsValue = shipment.CustomsValue;
 
-            // Validate origin country - DISABLED per requirements
-            // Origin country validation skipped to allow flexible sourcing
-            // if (allParsedData.TryGetValue("origin_country", out var docOrigin))
-            // {
-            //     if (!string.IsNullOrWhiteSpace(originCountry) && !docOrigin.Equals(originCountry, StringComparison.OrdinalIgnoreCase))
-            //     {
-            //         _issues.Add(new ValidationIssue
-            //         {
-            //             Severity = "warning",
-            //             Category = "data_consistency",
-            //             Message = "Origin country mismatch",
-            //             Details = $"Form shows '{originCountry}' but documents indicate '{docOrigin}'"
-            //         });
-            //     }
-            // }
-
-            // Validate destination country
-            if (allParsedData.TryGetValue("destination_country", out var docDest))
+            // ===== STRICT SHIPMENT DATA VALIDATION =====
+            // Destination country (MANDATORY MATCH)
+            if (allParsedData.TryGetValue("destination_country", out var docDest) && !string.IsNullOrWhiteSpace(docDest))
             {
-                if (!string.IsNullOrWhiteSpace(destinationCountry) && !docDest.Equals(destinationCountry, StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(destinationCountry))
                 {
-                    _issues.Add(new ValidationIssue
-                    {
-                        Severity = "warning",
-                        Category = "data_consistency",
-                        Message = "Destination country mismatch",
-                        Details = $"Form shows '{destinationCountry}' but documents indicate '{docDest}'"
-                    });
-                }
-            }
-
-            // Validate weight
-            if (allParsedData.TryGetValue("weight", out var docWeight))
-            {
-                if (decimal.TryParse(docWeight, out var parsedWeight) && totalWeight.HasValue)
-                {
-                    var tolerance = totalWeight.Value * 0.1m; // 10% tolerance
-                    if (Math.Abs(parsedWeight - totalWeight.Value) > tolerance)
+                    if (!docDest.Equals(destinationCountry, StringComparison.OrdinalIgnoreCase))
                     {
                         _issues.Add(new ValidationIssue
                         {
-                            Severity = "warning",
+                            Severity = "error",
                             Category = "data_consistency",
-                            Message = "Weight discrepancy",
-                            Details = $"Form shows {totalWeight}kg but documents indicate {parsedWeight}kg"
+                            Message = "DESTINATION COUNTRY MISMATCH",
+                            Details = $"Form shows '{destinationCountry}' but documents clearly state '{docDest}'. This is a critical mismatch indicating the documents may be for a different shipment.",
+                            SuggestedAction = "Upload documents for the correct destination country: " + destinationCountry
                         });
                     }
                 }
             }
 
-            // Validate HS Code
-            if (allParsedData.TryGetValue("hs_code", out var docHsCode))
+            // HS Code (MANDATORY MATCH - first 4 digits)
+            if (allParsedData.TryGetValue("hs_code", out var docHsCode) && !string.IsNullOrWhiteSpace(docHsCode))
             {
-                if (!string.IsNullOrEmpty(hsCode) &&
-                    !hsCode.StartsWith(docHsCode.Substring(0, Math.Min(4, docHsCode.Length))))
+                if (!string.IsNullOrEmpty(hsCode))
                 {
-                    _issues.Add(new ValidationIssue
+                    // Compare first 4 digits of HS codes
+                    var formHsPrefix = hsCode.Substring(0, Math.Min(4, hsCode.Length));
+                    var docHsPrefix = docHsCode.Substring(0, Math.Min(4, docHsCode.Length));
+                    
+                    if (!formHsPrefix.Equals(docHsPrefix, StringComparison.OrdinalIgnoreCase))
                     {
-                        Severity = "warning",
-                        Category = "data_consistency",
-                        Message = "HS Code mismatch",
-                        Details = $"Form shows '{hsCode}' but documents indicate '{docHsCode}'"
-                    });
+                        _issues.Add(new ValidationIssue
+                        {
+                            Severity = "error",
+                            Category = "data_consistency",
+                            Message = "HS CODE MISMATCH",
+                            Details = $"Form shows HS Code '{hsCode}' but documents indicate '{docHsCode}'. Different product categories indicate these are not the correct documents.",
+                            SuggestedAction = $"Upload Commercial Invoice and Packing List for HS Code {hsCode}"
+                        });
+                    }
                 }
             }
 
-            // Validate total value
-            if (allParsedData.TryGetValue("total_value", out var docValue))
+            // Product Description (WARNING MATCH)
+            if (allParsedData.TryGetValue("product_description", out var docProdDesc) && !string.IsNullOrWhiteSpace(docProdDesc))
             {
-                if (decimal.TryParse(docValue, out var parsedValue) && customsValue.HasValue)
+                if (!string.IsNullOrWhiteSpace(productDescription))
+                {
+                    var docDescLower = docProdDesc.ToLowerInvariant();
+                    var formDescLower = productDescription.ToLowerInvariant();
+                    
+                    // Check if key words match (allowing for variations)
+                    var formKeywords = formDescLower.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length > 3).Take(3).ToList();
+                    var docHasKeywords = formKeywords.All(kw => docDescLower.Contains(kw));
+                    
+                    if (!docHasKeywords && Math.Abs(docProdDesc.Length - productDescription.Length) > 50)
+                    {
+                        _issues.Add(new ValidationIssue
+                        {
+                            Severity = "warning",
+                            Category = "data_consistency",
+                            Message = "Product description differs significantly",
+                            Details = $"Form: '{productDescription}' vs Document: '{docProdDesc}'. Verify these describe the same product.",
+                            SuggestedAction = "Confirm the documents match your shipment contents"
+                        });
+                    }
+                }
+            }
+
+            // Weight (STRICT - within 5% tolerance)
+            if (allParsedData.TryGetValue("weight_kg", out var docWeight) && !string.IsNullOrWhiteSpace(docWeight))
+            {
+                if (decimal.TryParse(docWeight, out var parsedWeight) && totalWeight.HasValue && totalWeight.Value > 0)
+                {
+                    var tolerance = totalWeight.Value * 0.05m; // 5% tolerance for strict matching
+                    var diff = Math.Abs(parsedWeight - totalWeight.Value);
+                    
+                    if (diff > tolerance)
+                    {
+                        _issues.Add(new ValidationIssue
+                        {
+                            Severity = "error",
+                            Category = "data_consistency",
+                            Message = "Weight discrepancy exceeds tolerance",
+                            Details = $"Form shows {totalWeight}kg but documents indicate {parsedWeight}kg (difference: {diff}kg, tolerance: {tolerance}kg). This suggests documents may not match the actual shipment.",
+                            SuggestedAction = "Verify shipment weight or upload correct packing list"
+                        });
+                    }
+                    else if (diff > tolerance * 0.5m)
+                    {
+                        _issues.Add(new ValidationIssue
+                        {
+                            Severity = "warning",
+                            Category = "data_consistency",
+                            Message = "Minor weight discrepancy",
+                            Details = $"Form shows {totalWeight}kg but documents indicate {parsedWeight}kg (difference: {diff}kg)"
+                        });
+                    }
+                }
+            }
+
+            // Package Count (WARNING)
+            if (allParsedData.TryGetValue("package_count", out var docPackCount) && !string.IsNullOrWhiteSpace(docPackCount))
+            {
+                if (int.TryParse(docPackCount, out var parsedPackCount) && packageCount > 0)
+                {
+                    if (parsedPackCount != packageCount)
+                    {
+                        _issues.Add(new ValidationIssue
+                        {
+                            Severity = "warning",
+                            Category = "data_consistency",
+                            Message = "Package count mismatch",
+                            Details = $"Form shows {packageCount} package(s) but documents indicate {parsedPackCount}",
+                            SuggestedAction = "Verify the number of packages in your shipment"
+                        });
+                    }
+                }
+            }
+
+            // Total Value (WARNING - within 5% tolerance)
+            if (allParsedData.TryGetValue("total_value", out var docValue) && !string.IsNullOrWhiteSpace(docValue))
+            {
+                if (decimal.TryParse(docValue, out var parsedValue) && customsValue.HasValue && customsValue.Value > 0)
                 {
                     var tolerance = customsValue.Value * 0.05m; // 5% tolerance
                     if (Math.Abs(parsedValue - customsValue.Value) > tolerance)
                     {
                         _issues.Add(new ValidationIssue
                         {
-                            Severity = "info",
+                            Severity = "warning",
                             Category = "data_consistency",
-                            Message = "Shipment value difference",
-                            Details = $"Form shows {customsValue} but documents indicate {parsedValue}"
+                            Message = "Shipment value discrepancy",
+                            Details = $"Form shows ${customsValue} but documents indicate ${parsedValue}. Ensure invoice amounts match declared value.",
+                            SuggestedAction = "Verify declared value matches the commercial invoice"
                         });
                     }
+                }
+            }
+
+            // Mode of Transport (WARNING)
+            if (allParsedData.TryGetValue("mode_of_transport", out var docMode) && !string.IsNullOrWhiteSpace(docMode))
+            {
+                if (!string.IsNullOrWhiteSpace(modeOfTransport))
+                {
+                    if (!docMode.Equals(modeOfTransport, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _issues.Add(new ValidationIssue
+                        {
+                            Severity = "warning",
+                            Category = "data_consistency",
+                            Message = "Transport mode mismatch",
+                            Details = $"Form shows '{modeOfTransport}' but documents indicate '{docMode}'"
+                        });
+                    }
+                }
+            }
+
+            // Shipper/Consignee Names (INFO)
+            if (allParsedData.TryGetValue("shipper_name", out var docShipper) && !string.IsNullOrWhiteSpace(docShipper))
+            {
+                if (!string.IsNullOrWhiteSpace(shipperName) && !docShipper.Contains(shipperName, StringComparison.OrdinalIgnoreCase) && !shipperName.Contains(docShipper, StringComparison.OrdinalIgnoreCase))
+                {
+                    _issues.Add(new ValidationIssue
+                    {
+                        Severity = "info",
+                        Category = "data_consistency",
+                        Message = "Shipper name differs",
+                        Details = $"Form: '{shipperName}' vs Document: '{docShipper}'"
+                    });
                 }
             }
         }
@@ -273,6 +366,10 @@ namespace PreClear.Api.AI.Services.DocumentValidator
                 var packageType = detail.Packages.FirstOrDefault()?.PackageType ?? string.Empty;
                 var hsCode = detail.Items.FirstOrDefault()?.HsCode ?? string.Empty;
                 var totalWeight = detail.Packages.Any() ? detail.Packages.Sum(p => p.Weight ?? 0m) : (decimal?)null;
+                
+                // ALSO check extracted products from documents
+                var extractedProducts = ExtractProductsFromDocuments(documents);
+                
                 var matchingRules = _complianceLoader.FindMatchingRules(
                     originCountry,
                     destinationCountry,
@@ -282,9 +379,23 @@ namespace PreClear.Api.AI.Services.DocumentValidator
 
                 _logger.LogDebug("Compliance rules matched: {Count} for O={O} D={D} Mode={M} Package={P} HS={HS}",
                     matchingRules.Count, originCountry, destinationCountry, shipment.Mode, packageType, hsCode);
+                
+                // Also match rules against extracted product data
+                foreach (var extractedProduct in extractedProducts)
+                {
+                    var productRules = _complianceLoader.FindMatchingRules(
+                        originCountry,
+                        destinationCountry,
+                        shipment.Mode,
+                        extractedProduct.PackageType ?? packageType,
+                        extractedProduct.HsCode ?? hsCode);
+                    
+                    matchingRules.AddRange(productRules);
+                }
 
                 foreach (var rule in matchingRules)
-                { _logger.LogDebug("Rule: O={O} D={D} Mode={M} Package={P} HS={HS} Banned={Banned} Restricted={Restricted}",
+                {
+                    _logger.LogDebug("Rule: O={O} D={D} Mode={M} Package={P} HS={HS} Banned={Banned} Restricted={Restricted}",
                         rule.OriginCountry, rule.DestinationCountry, rule.Mode, rule.PackageType, rule.HsCode, rule.Banned, rule.Restricted);
                     if (!string.IsNullOrWhiteSpace(rule.PackingNotes))
                     {
@@ -359,6 +470,42 @@ namespace PreClear.Api.AI.Services.DocumentValidator
                 });
             }
             return notes.Distinct().ToList();
+        }
+
+        private List<ExtractedProductInfo> ExtractProductsFromDocuments(List<ExtractedDocument> documents)
+        {
+            var products = new List<ExtractedProductInfo>();
+            
+            foreach (var doc in documents)
+            {
+                if (doc.ParsedData == null) continue;
+                
+                var product = new ExtractedProductInfo
+                {
+                    ProductName = doc.ParsedData.TryGetValue("product_name", out var name) ? name : 
+                                  (doc.ParsedData.TryGetValue("product_description", out var desc) ? desc : null),
+                    ProductCategory = doc.ParsedData.TryGetValue("product_category", out var cat) ? cat : null,
+                    HsCode = doc.ParsedData.TryGetValue("hs_code", out var hs) ? hs : null,
+                    PackageType = doc.ParsedData.TryGetValue("package_type", out var pkg) ? pkg : null,
+                    Weight = doc.ParsedData.TryGetValue("weight_kg", out var wt) && decimal.TryParse(wt, out var wtVal) ? wtVal : null
+                };
+                
+                if (!string.IsNullOrWhiteSpace(product.ProductName) || !string.IsNullOrWhiteSpace(product.HsCode))
+                {
+                    products.Add(product);
+                }
+            }
+            
+            return products;
+        }
+
+        private class ExtractedProductInfo
+        {
+            public string? ProductName { get; set; }
+            public string? ProductCategory { get; set; }
+            public string? HsCode { get; set; }
+            public string? PackageType { get; set; }
+            public decimal? Weight { get; set; }
         }
 
         private void ValidateProductRestrictions(ShipmentDetailDto detail, List<ExtractedDocument> documents)
@@ -530,7 +677,25 @@ namespace PreClear.Api.AI.Services.DocumentValidator
                 return 0m;
             }
 
-            // Heavier penalty for any errors
+            // Hard fail for critical mismatches (destination country, HS code)
+            var hasCriticalMismatch = issues.Any(i => 
+                (i.Message.Contains("DESTINATION COUNTRY MISMATCH", StringComparison.OrdinalIgnoreCase) ||
+                 i.Message.Contains("HS CODE MISMATCH", StringComparison.OrdinalIgnoreCase)) &&
+                i.Severity == "error");
+            if (hasCriticalMismatch)
+            {
+                return 0m;
+            }
+
+            // Hard fail for banned products
+            var hasBannedProduct = issues.Any(i => i.Category == "compliance" && i.Message.Contains("banned", StringComparison.OrdinalIgnoreCase) && i.Severity == "error");
+            if (hasBannedProduct)
+            {
+                return 0m;
+            }
+
+            // Scoring: Errors are critical (30 points each), warnings moderate (5 points), info minor (1 point)
+            // Base score starts at 100, penalties applied per issue
             var score = 100m - (errorCount * 30) - (warningCount * 5) - (infoCount * 1);
             return Math.Max(0, Math.Min(100, score));
         }

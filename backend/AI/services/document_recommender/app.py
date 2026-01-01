@@ -149,7 +149,7 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     logger.info("Starting Pre-Clear Document Recommender Service")
     logger.info("Architecture: Hybrid (Deterministic Rules + ML)")
-    logger.info("Port: 8002")
+    logger.info("Port: 9000")
     logger.info("=" * 60)
     
-    uvicorn.run(app, host="0.0.0.0", port=8002, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=9000, log_level="info")

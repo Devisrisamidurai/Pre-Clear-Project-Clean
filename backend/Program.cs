@@ -90,6 +90,7 @@ builder.Services.AddScoped<ComplianceDatasetLoader>();
 builder.Services.AddScoped<DocumentExtractor>();
 builder.Services.AddScoped<DocumentValidator>();
 builder.Services.AddScoped<IDocumentValidationService, DocumentValidationService>();
+builder.Services.AddScoped<IComplianceValidationService, ComplianceValidationService>();
 builder.Services.AddScoped<IAiDocumentAnalyzer, AiDocumentAnalyzerBedrock>();
 
 // AWS Textract Service
