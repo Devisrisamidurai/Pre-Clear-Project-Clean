@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
+using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -81,6 +82,7 @@ namespace PreClear.Api.Controllers
         public class SendMessageRequest
         {
             // SECURITY: SenderId REMOVED - extract from JWT claims only
+            [Required]
             public string Message { get; set; } = string.Empty;
         }
 

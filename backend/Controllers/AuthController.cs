@@ -79,25 +79,45 @@ namespace PreClear.Api.Controllers
 
     public class SignUpRequest
     {
+        [Required]
         public string FirstName { get; set; } = null!;
+
+        [Required]
         public string LastName { get; set; } = null!;
+
+        [Required]
+        [EmailAddress]
         public string Email { get; set; } = null!;
+
+        [Required]
+        [MinLength(6)]
         public string Password { get; set; } = null!;
+
         public string? Phone { get; set; }
         public string? Company { get; set; }
         public string? Role { get; set; }
+
+        [Required]
         public bool TosAccepted { get; set; }
     }
 
     public class SignInRequest
     {
+        [Required]
+        [EmailAddress]
         public string Email { get; set; } = null!;
+
+        [Required]
         public string Password { get; set; } = null!;
     }
 
     public class ChangePasswordRequest
     {
+        [Required]
         public string CurrentPassword { get; set; } = string.Empty;
+
+        [Required]
+        [MinLength(6)]
         public string NewPassword { get; set; } = string.Empty;
     }
 }

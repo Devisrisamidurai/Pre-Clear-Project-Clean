@@ -15,6 +15,9 @@ using PreClear.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Listen on all interfaces for EC2/containers
+builder.WebHost.UseUrls("http://0.0.0.0:5000");
+
 // Add services
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -179,14 +182,18 @@ if (!string.IsNullOrWhiteSpace(effectiveConn))
     catch { }
 }
 
-// CORS Configuration for AWS Deployment
+// CORS configuration for CloudFront + local dev
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
+    options.AddPolicy("FrontendPolicy", policy =>
     {
-        policy.AllowAnyOrigin()
+        policy.WithOrigins(
+                "https://du1z2598uav6k.cloudfront.net",
+                "http://du1z2598uav6k.cloudfront.net",
+                "http://localhost:3000")
               .AllowAnyMethod()
-              .AllowAnyHeader();
+              .AllowAnyHeader()
+              .AllowCredentials();
     });
 });
 
@@ -295,25 +302,23 @@ catch (Exception ex)
     Console.WriteLine($"Error during startup initialization: {ex.Message}");
 }
 
-// Enable Swagger UI for all environments (local development and testing)
-// In production, you may want to disable this or add authentication
-app.UseSwagger(c =>
-{
-    c.RouteTemplate = "swagger/{documentName}/swagger.json";
-});
-
-app.UseSwaggerUI(c =>
-{
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "PreClear API v1");
-    c.RoutePrefix = "swagger"; // Swagger available at /swagger
-    c.DefaultModelsExpandDepth(2);
-    c.DefaultModelExpandDepth(2);
-    c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.List);
-    c.EnableValidator();
-});
-
 if (app.Environment.IsDevelopment())
 {
+    app.UseSwagger(c =>
+    {
+        c.RouteTemplate = "swagger/{documentName}/swagger.json";
+    });
+
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "PreClear API v1");
+        c.RoutePrefix = "swagger"; // Swagger available at /swagger
+        c.DefaultModelsExpandDepth(2);
+        c.DefaultModelExpandDepth(2);
+        c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.List);
+        c.EnableValidator();
+    });
+
     app.UseDeveloperExceptionPage();
 }
 
@@ -323,14 +328,15 @@ if (enableHttps)
     app.UseHttpsRedirection();
 }
 
-app.UseCors("AllowAll");
+app.UseRouting();
+app.UseCors("FrontendPolicy");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
 Console.WriteLine($"=== Pre-Clear Backend Ready to Run ===");
 Console.WriteLine($"Environment: {app.Environment.EnvironmentName}");
-Console.WriteLine($"Listening on: http://localhost:5000");
+Console.WriteLine($"Listening on: http://0.0.0.0:5000");
 Console.WriteLine($"Press Ctrl+C to stop");
 Console.WriteLine($"====================================");
 

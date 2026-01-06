@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using PreClear.Api.Data;
 using PreClear.Api.Interfaces;
@@ -19,12 +20,18 @@ namespace PreClear.Api.Services
         private readonly IAiRepository _repo;
         private readonly ILogger<AiService> _logger;
         private readonly IHttpClientFactory _httpFactory;
+        private readonly string _documentRecommendationEndpoint;
+        private readonly string _documentPredictBaseUrl;
+        private readonly string _hsSuggestEndpoint;
 
-        public AiService(IAiRepository repo, ILogger<AiService> logger, IHttpClientFactory httpFactory)
+        public AiService(IAiRepository repo, ILogger<AiService> logger, IHttpClientFactory httpFactory, IConfiguration configuration)
         {
             _repo = repo;
             _logger = logger;
             _httpFactory = httpFactory;
+            _documentRecommendationEndpoint = configuration["AiServices:DocumentRecommendationUrl"] ?? "http://localhost:9000/predict-documents";
+            _documentPredictBaseUrl = configuration["AiServices:DocumentPredictBaseUrl"] ?? "http://localhost:9000";
+            _hsSuggestEndpoint = configuration["AiServices:HsSuggestUrl"] ?? "http://localhost:8001/suggest-hs";
         }
 
         public async Task<AiResultDto> AnalyzeAsync(string description)
@@ -117,7 +124,7 @@ namespace PreClear.Api.Services
 
             try
             {
-                var resp = await client.PostAsJsonAsync("http://localhost:9000/predict-documents", payload);
+                var resp = await client.PostAsJsonAsync(_documentRecommendationEndpoint, payload);
                 if (!resp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Document recommendation service returned {Status}", resp.StatusCode);
@@ -194,7 +201,8 @@ namespace PreClear.Api.Services
 
             try
             {
-                var url = $"http://localhost:{pythonPort}/predict-documents";
+                var baseUrl = string.IsNullOrWhiteSpace(_documentPredictBaseUrl) ? $"http://localhost:{pythonPort}" : _documentPredictBaseUrl;
+                var url = $"{baseUrl.TrimEnd('/')}/predict-documents";
                 var resp = await client.PostAsJsonAsync(url, payload);
 
                 if (!resp.IsSuccessStatusCode)
@@ -339,7 +347,7 @@ namespace PreClear.Api.Services
             var payload = new { name = name ?? string.Empty, category = category ?? string.Empty, description = description ?? string.Empty, k };
             try
             {
-                var resp = await client.PostAsJsonAsync("http://localhost:8001/suggest-hs", payload);
+                var resp = await client.PostAsJsonAsync(_hsSuggestEndpoint, payload);
                 if (!resp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("HS suggest service returned {Status}", resp.StatusCode);

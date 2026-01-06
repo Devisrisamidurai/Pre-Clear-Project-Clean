@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 
 namespace PreClear.Api.Models
 {
@@ -59,11 +60,14 @@ namespace PreClear.Api.Models
         /// <summary>
         /// List of document names/types being requested
         /// </summary>
+        [Required]
+        [MinLength(1)]
         public List<string> DocumentNames { get; set; } = new();
 
         /// <summary>
         /// Message from broker to shipper
         /// </summary>
+        [Required]
         public string Message { get; set; }
     }
 }
